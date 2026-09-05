@@ -243,20 +243,28 @@ Distribution), écran *API et services → Identifiants* :
 
 ## Déploiement sur le VPS
 
-Serveur OVH Debian 13, SSH sur le port **2222**.
+Serveur OVH Debian 13, SSH sur le port **2222**, API publiée sur
+**`https://questbook.nextuscorp.com`** (enregistrement A vers `151.80.144.246`).
+
+Les trois scripts sont idempotents : les relancer ne casse rien.
 
 ```bash
 # 1. Provisionnement (une seule fois) : Docker, firewall, /opt/questbook
 ssh -p 2222 debian@151.80.144.246 'bash -s' < deploy/provision-vps.sh
 
-# 2. Code et configuration
-ssh -p 2222 debian@151.80.144.246
-git clone git@github.com:Sraime/questbook-back.git /opt/questbook
-cd /opt/questbook && cp .env.example .env && nano .env
+# 2. Clone + génération du .env (secrets créés sur le VPS, jamais en transit)
+ssh -p 2222 debian@151.80.144.246 \
+  'API_DOMAIN=questbook.nextuscorp.com GOOGLE_CLIENT_IDS=<client-web>.apps.googleusercontent.com bash -s' \
+  < deploy/bootstrap.sh
 
-# 3. Démarrage
-./deploy/deploy.sh
+# 3. Build et démarrage (à relancer à chaque mise à jour de `main`)
+ssh -p 2222 debian@151.80.144.246 'cd /opt/questbook && ./deploy/deploy.sh'
 ```
+
+`bootstrap.sh` refuse d'écraser un `.env` existant : régénérer `JWT_SECRET`
+déconnecterait tous les utilisateurs, et changer `POSTGRES_PASSWORD` après la
+création du volume interdirait à l'API l'accès à sa propre base. Pour modifier
+une valeur, éditer le fichier à la main puis relancer `deploy.sh`.
 
 La pile Docker Compose contient trois services :
 
