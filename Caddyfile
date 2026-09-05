@@ -1,0 +1,15 @@
+# Caddy obtains and renews the Let's Encrypt certificate on its own, so there
+# is no certbot cron job to forget about. API_DOMAIN comes from .env.
+
+{$API_DOMAIN} {
+	encode zstd gzip
+
+	log {
+		output stdout
+		format console
+	}
+
+	reverse_proxy api:3000 {
+		health_uri /health
+	}
+}

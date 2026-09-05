@@ -1,0 +1,25 @@
+# Local development: PostgreSQL only. The API itself runs on the host with
+# `npm run dev`, so the Flutter app can reach it on http://localhost:3000.
+#
+#   docker compose -f docker-compose.dev.yml up -d
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: questbook
+      POSTGRES_PASSWORD: questbook
+      POSTGRES_DB: questbook
+    ports:
+      - '5432:5432'
+    volumes:
+      - dev-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U questbook -d questbook']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  dev-db-data:

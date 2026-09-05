@@ -1,0 +1,11 @@
+# Ce dépôt est déployé sur Linux depuis des machines Windows. Un CRLF dans un
+# script shell y produit un `$'\r': command not found` très déroutant, donc
+# tout est normalisé en LF, y compris dans la copie de travail.
+* text=auto eol=lf
+
+*.sh          text eol=lf
+Dockerfile    text eol=lf
+Caddyfile     text eol=lf
+*.yml         text eol=lf
+*.png         binary
+*.jpg         binary
