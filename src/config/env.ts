@@ -31,6 +31,25 @@ const envSchema = z.object({
 
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(300),
   RATE_LIMIT_WINDOW: z.string().default('1 minute'),
+
+  /// Where the invitation links in outgoing emails point. Must be reachable
+  /// from a mail client, so it is the public origin rather than HOST/PORT.
+  PUBLIC_BASE_URL: z.string().url().default('http://localhost:3000'),
+  INVITATION_TTL_DAYS: z.coerce.number().int().positive().default(14),
+
+  /// Email and push are both optional: without credentials the senders fall
+  /// back to logging what they would have sent, so a local checkout runs with
+  /// no third-party account at all.
+  RESEND_API_KEY: z.string().default(''),
+  EMAIL_FROM: z.string().default('Questbook <onboarding@resend.dev>'),
+
+  FIREBASE_PROJECT_ID: z.string().default(''),
+  FIREBASE_CLIENT_EMAIL: z.string().default(''),
+  /// Pasted from the service account JSON, where newlines are escaped as \n.
+  FIREBASE_PRIVATE_KEY: z
+    .string()
+    .default('')
+    .transform((value) => value.replace(/\\n/g, '\n')),
 });
 
 export type Env = z.infer<typeof envSchema>;

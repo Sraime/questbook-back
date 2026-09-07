@@ -11,16 +11,28 @@ import type { PrismaClient } from '@prisma/client';
 import type { Env } from './config/env.js';
 import { AppError } from './lib/errors.js';
 import authPlugin from './plugins/auth.js';
+import messagingPlugin from './plugins/messaging.js';
 import prismaPlugin from './plugins/prisma.js';
 import authRoutes from './modules/auth/auth.routes.js';
 import characterRoutes from './modules/characters/character.routes.js';
+import deviceRoutes from './modules/notifications/device.routes.js';
+import notificationRoutes from './modules/notifications/notification.routes.js';
+import invitationRoutes from './modules/tables/invitation.routes.js';
+import invitationWebRoutes from './modules/tables/invitation-web.routes.js';
+import sessionRoutes from './modules/tables/session.routes.js';
+import tableRoutes from './modules/tables/table.routes.js';
 import type { GoogleVerifier } from './modules/auth/google-verifier.js';
+import type { EmailSender } from './lib/email-sender.js';
+import type { PushSender } from './lib/push-sender.js';
 
 export interface BuildAppOptions {
   env: Env;
-  /// Test seams: an already-open Prisma client and a stubbed Google verifier.
+  /// Test seams: an already-open Prisma client, and stubs for everything that
+  /// would otherwise reach the network.
   prismaClient?: PrismaClient;
   googleVerifier?: GoogleVerifier;
+  emailSender?: EmailSender;
+  pushSender?: PushSender;
 }
 
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
@@ -35,6 +47,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
           'req.headers.authorization',
           'req.body.idToken',
           'req.body.refreshToken',
+          // An invitation token grants table membership to whoever holds it.
+          'req.params.token',
         ],
         censor: '[redacted]',
       },
@@ -121,13 +135,40 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     googleVerifier: options.googleVerifier,
   });
 
+  await app.register(messagingPlugin, {
+    resendApiKey: env.RESEND_API_KEY,
+    emailFrom: env.EMAIL_FROM,
+    firebaseProjectId: env.FIREBASE_PROJECT_ID,
+    firebaseClientEmail: env.FIREBASE_CLIENT_EMAIL,
+    firebasePrivateKey: env.FIREBASE_PRIVATE_KEY,
+    emailSender: options.emailSender,
+    pushSender: options.pushSender,
+  });
+
   app.get('/health', async () => {
     await app.prisma.$queryRaw`SELECT 1`;
     return { status: 'ok', uptime: process.uptime() };
   });
 
+  const tableOptions = {
+    publicBaseUrl: env.PUBLIC_BASE_URL,
+    invitationTtlDays: env.INVITATION_TTL_DAYS,
+  };
+
   await app.register(authRoutes, { prefix: '/api/v1/auth' });
   await app.register(characterRoutes, { prefix: '/api/v1/characters' });
+  await app.register(tableRoutes, { ...tableOptions, prefix: '/api/v1/tables' });
+  await app.register(sessionRoutes, { prefix: '/api/v1/sessions' });
+  await app.register(invitationRoutes, {
+    ...tableOptions,
+    prefix: '/api/v1/invitations',
+  });
+  await app.register(notificationRoutes, { prefix: '/api/v1/notifications' });
+  await app.register(deviceRoutes, { prefix: '/api/v1/devices' });
+
+  // Outside /api/v1 and unauthenticated: this is the link people click in
+  // their mail client, and it renders HTML rather than JSON.
+  await app.register(invitationWebRoutes, { ...tableOptions, prefix: '/invitations' });
 
   return app;
 }

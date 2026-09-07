@@ -26,6 +26,14 @@ model User {
   characters    Character[]
   refreshTokens RefreshToken[]
 
+  ownedTables         GameTable[]         @relation("TableOwner")
+  memberships         TableMember[]
+  sentInvitations     TableInvitation[]   @relation("InvitationSender")
+  receivedInvitations TableInvitation[]   @relation("InvitationRecipient")
+  attendances         SessionAttendance[]
+  deviceTokens        DeviceToken[]
+  notifications       Notification[]
+
   @@map("users")
 }
 
@@ -117,4 +125,139 @@ model InventoryItem {
 
   @@index([characterId])
   @@map("inventory_items")
+}
+
+/// A group of players who organise play sessions together. Unlike characters,
+/// tables are shared between users, so they are never stored on the client and
+/// the server is the only source of truth.
+model GameTable {
+  id            String   @id @default(uuid())
+  title         String
+  universeLabel String?  @map("universe_label")
+  ownerId       String   @map("owner_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  owner       User              @relation("TableOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members     TableMember[]
+  invitations TableInvitation[]
+  sessions    GameSession[]
+
+  @@index([ownerId])
+  @@map("game_tables")
+}
+
+/// The table creator is inserted as a `gm` member at creation time, so
+/// membership alone answers "may this user see the table", and the role
+/// answers "may this user change it".
+model TableMember {
+  id       String   @id @default(uuid())
+  tableId  String   @map("table_id")
+  userId   String   @map("user_id")
+  role     String
+  joinedAt DateTime @default(now()) @map("joined_at")
+
+  table GameTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  user  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tableId, userId])
+  @@index([userId])
+  @@map("table_members")
+}
+
+/// Invitations are only ever created for an email that already has an account,
+/// so `invitedUserId` is always known and the acceptance link needs no login.
+/// The token is stored hashed for the same reason as refresh tokens: whoever
+/// holds it can join the table.
+model TableInvitation {
+  id            String    @id @default(uuid())
+  tableId       String    @map("table_id")
+  email         String
+  invitedUserId String    @map("invited_user_id")
+  invitedById   String    @map("invited_by_id")
+  tokenHash     String    @unique @map("token_hash")
+  status        String    @default("pending")
+  expiresAt     DateTime  @map("expires_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  respondedAt   DateTime? @map("responded_at")
+
+  table       GameTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  invitedUser User      @relation("InvitationRecipient", fields: [invitedUserId], references: [id], onDelete: Cascade)
+  invitedBy   User      @relation("InvitationSender", fields: [invitedById], references: [id], onDelete: Cascade)
+
+  @@unique([tableId, invitedUserId])
+  @@index([invitedUserId, status])
+  @@map("table_invitations")
+}
+
+model GameSession {
+  id          String   @id @default(uuid())
+  tableId     String   @map("table_id")
+  title       String
+  description String?
+  startsAt    DateTime @map("starts_at")
+  location    String
+  status      String   @default("scheduled")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  table       GameTable           @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  attendances SessionAttendance[]
+
+  @@index([tableId, startsAt])
+  @@map("game_sessions")
+}
+
+/// A missing row means "has not answered yet", which is deliberately distinct
+/// from an explicit "no": the GM needs to tell the two apart when deciding
+/// whether to go ahead with a session.
+model SessionAttendance {
+  id          String   @id @default(uuid())
+  sessionId   String   @map("session_id")
+  userId      String   @map("user_id")
+  status      String
+  respondedAt DateTime @default(now()) @map("responded_at")
+
+  session GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, userId])
+  @@index([userId])
+  @@map("session_attendances")
+}
+
+/// One row per device, not per user: a player who installs the app on a phone
+/// and a tablet must be reachable on both.
+model DeviceToken {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  token      String   @unique
+  platform   String
+  createdAt  DateTime @default(now()) @map("created_at")
+  lastSeenAt DateTime @default(now()) @map("last_seen_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("device_tokens")
+}
+
+/// Written inside the same transaction as the change that caused it, which
+/// makes the in-app history authoritative. Push delivery is a best-effort side
+/// effect layered on top and may legitimately fail without losing anything.
+model Notification {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  type      String
+  title     String
+  body      String
+  tableId   String?   @map("table_id")
+  sessionId String?   @map("session_id")
+  readAt    DateTime? @map("read_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("notifications")
 }
