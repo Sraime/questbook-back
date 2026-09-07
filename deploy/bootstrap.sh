@@ -74,7 +74,9 @@ INVITATION_TTL_DAYS=14
 # Filled in by hand once the Resend domain is verified. Until then invitation
 # emails are only logged, and the in-app invitation still works.
 RESEND_API_KEY=${RESEND_API_KEY:-}
-EMAIL_FROM=${EMAIL_FROM:-Questbook <invitations@mail.${API_DOMAIN#*.}>}
+# Sending from the API's own hostname keeps the From domain identical to the
+# domain of the invitation link inside the message, which spam filters reward.
+EMAIL_FROM=${EMAIL_FROM:-Questbook <invitations@${API_DOMAIN}>}
 
 # Filled in by hand from a Firebase service account key. Until then push is
 # skipped, and the in-app notification history is unaffected.

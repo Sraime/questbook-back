@@ -391,16 +391,21 @@ de vrai :
 
 1. Créer un compte sur [resend.com](https://resend.com) (palier gratuit :
    3 000 e-mails par mois, 100 par jour).
-2. Y ajouter un **sous-domaine** d'envoi, `mail.nextuscorp.com` plutôt que le
-   domaine racine : un problème de réputation reste ainsi cantonné aux e-mails
-   transactionnels et n'affecte pas le courrier du domaine principal.
+2. Y ajouter comme domaine d'envoi le **sous-domaine de l'API**,
+   `questbook.nextuscorp.com`, et non le domaine racine. Deux raisons : le SPF
+   de la racine se termine par `-all` pour la messagerie OVH, donc y ajouter un
+   second expéditeur affaiblirait la protection d'une boîte qui n'a rien à voir
+   avec l'app ; et l'adresse d'expédition se retrouve sur le même domaine que le
+   lien d'acceptation contenu dans le message, cohérence que les filtres
+   anti-spam apprécient.
 3. Publier chez OVH les enregistrements DNS que Resend affiche (DKIM en `TXT`,
-   `MX` de retour, et `TXT` SPF), puis lancer la vérification.
+   `MX` de retour, et `TXT` SPF), puis lancer la vérification. Le `MX` cohabite
+   sans problème avec l'enregistrement `A` de l'API sur le même nom.
 4. Renseigner sur le VPS, dans `/opt/questbook/.env` :
 
    ```
    RESEND_API_KEY=re_xxxxxxxx
-   EMAIL_FROM=Questbook <invitations@mail.nextuscorp.com>
+   EMAIL_FROM=Questbook <invitations@questbook.nextuscorp.com>
    ```
 
 ### Notifications push (Firebase)
