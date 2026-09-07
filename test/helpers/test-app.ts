@@ -3,6 +3,12 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../../src/app.js';
 import { loadEnv } from '../../src/config/env.js';
 import { unauthorized } from '../../src/lib/errors.js';
+import type { EmailMessage, EmailSender } from '../../src/lib/email-sender.js';
+import type {
+  PushMessage,
+  PushResult,
+  PushSender,
+} from '../../src/lib/push-sender.js';
 import type {
   GoogleIdentity,
   GoogleVerifier,
@@ -45,13 +51,44 @@ export class FakeGoogleVerifier implements GoogleVerifier {
   }
 }
 
+/// Records what would have been sent so a test can assert on the recipient and
+/// pull the invitation link out of the body.
+export class FakeEmailSender implements EmailSender {
+  readonly sent: EmailMessage[] = [];
+
+  async send(message: EmailMessage): Promise<void> {
+    this.sent.push(message);
+  }
+
+  lastTo(email: string): EmailMessage | undefined {
+    return [...this.sent].reverse().find((message) => message.to === email);
+  }
+}
+
+export class FakePushSender implements PushSender {
+  readonly sent: PushMessage[] = [];
+  /// Tokens to report back as dead, to exercise the pruning path.
+  staleTokens: string[] = [];
+
+  async send(message: PushMessage): Promise<PushResult> {
+    this.sent.push(message);
+    return {
+      staleTokens: message.tokens.filter((token) => this.staleTokens.includes(token)),
+    };
+  }
+}
+
 export interface TestContext {
   app: FastifyInstance;
   google: FakeGoogleVerifier;
+  email: FakeEmailSender;
+  push: FakePushSender;
 }
 
 export async function createTestApp(): Promise<TestContext> {
   const google = new FakeGoogleVerifier();
+  const email = new FakeEmailSender();
+  const push = new FakePushSender();
 
   const env = loadEnv({
     NODE_ENV: 'test',
@@ -63,16 +100,24 @@ export async function createTestApp(): Promise<TestContext> {
     RATE_LIMIT_MAX: '100000',
   } as NodeJS.ProcessEnv);
 
-  const app = await buildApp({ env, prismaClient: prisma, googleVerifier: google });
+  const app = await buildApp({
+    env,
+    prismaClient: prisma,
+    googleVerifier: google,
+    emailSender: email,
+    pushSender: push,
+  });
   await app.ready();
 
-  return { app, google };
+  return { app, google, email, push };
 }
 
-/// Cascades from `users` reach characters and their children.
+/// Cascades from `users` reach characters and their children, and every table
+/// added below. Listing them all anyway keeps the reset honest if a future
+/// model ever stops cascading from a user.
 export async function resetDatabase(): Promise<void> {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE users, characters, character_stats, character_resources, inventory_items, refresh_tokens RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE users, characters, character_stats, character_resources, inventory_items, refresh_tokens, game_tables, table_members, table_invitations, game_sessions, session_attendances, device_tokens, notifications RESTART IDENTITY CASCADE',
   );
 }
 
@@ -80,6 +125,7 @@ export interface SignedInUser {
   accessToken: string;
   refreshToken: string;
   userId: string;
+  email: string;
   authHeader: { authorization: string };
 }
 
@@ -105,6 +151,7 @@ export async function signIn(
     accessToken: body.accessToken,
     refreshToken: body.refreshToken,
     userId: body.user.id,
+    email: body.user.email,
     authHeader: { authorization: `Bearer ${body.accessToken}` },
   };
 }

@@ -1,8 +1,9 @@
 # Questbook — API
 
 Backend de [questbook-app](https://github.com/Sraime/questbook-app) : connexion
-via un compte Google et persistance des personnages (caractéristiques,
-compétences, ressources, inventaire) sur un compte utilisateur.
+via un compte Google, persistance des personnages (caractéristiques,
+compétences, ressources, inventaire) sur un compte utilisateur, et gestion des
+tables de jeu — membres, invitations par e-mail, sessions et notifications.
 
 **Node.js 22 · Fastify 5 · Prisma 6 · PostgreSQL 17 · TypeScript**
 
@@ -17,6 +18,7 @@ UI et documentation en **français**, code et commentaires en **anglais**
 - [Modèle de données](#modèle-de-données)
 - [Authentification](#authentification)
 - [Endpoints](#endpoints)
+- [Tables, sessions et notifications](#tables-sessions-et-notifications)
 - [Synchronisation](#synchronisation)
 - [Développement local](#développement-local)
 - [Configuration Google Cloud](#configuration-google-cloud)
@@ -32,13 +34,19 @@ src/
 ├── index.ts                  point d'entrée : charge la config, démarre le serveur
 ├── app.ts                    construction de l'instance Fastify (plugins, routes, erreurs)
 ├── config/env.ts             validation zod des variables d'environnement
-├── lib/errors.ts             AppError + helpers (badRequest, notFound, conflict…)
+├── lib/
+│   ├── errors.ts             AppError + helpers (badRequest, notFound, conflict…)
+│   ├── email-sender.ts       interface EmailSender + implémentation Resend
+│   └── push-sender.ts        interface PushSender + implémentation FCM HTTP v1
 ├── plugins/
 │   ├── prisma.ts             connexion PostgreSQL, décorée sur `app.prisma`
-│   └── auth.ts               JWT, AuthService, garde `app.authenticate`
+│   ├── auth.ts               JWT, AuthService, garde `app.authenticate`
+│   └── messaging.ts          `app.email` et `app.notifications`
 └── modules/
     ├── auth/                 vérification Google, émission/rotation des jetons
-    └── characters/           schémas zod, service métier, routes REST
+    ├── characters/           schémas zod, service métier, routes REST
+    ├── tables/               tables, membres, invitations, sessions
+    └── notifications/        historique in-app et jetons d'appareil
 ```
 
 Trois principes structurent le code :
@@ -79,9 +87,18 @@ garde une identité unique sur tous les appareils, sans table de correspondance.
 | `character_stats`     | Caractéristiques, compétences et attributs (`kind`)               |
 | `character_resources` | PV / SAN / PM (`current`, `max`, `tone`)                          |
 | `inventory_items`     | Objets (`name`, `qty`, `weight`)                                  |
+| `game_tables`         | Table de jeu : titre, univers optionnel, MJ propriétaire          |
+| `table_members`       | Appartenance et rôle (`gm` / `player`)                            |
+| `table_invitations`   | Invitations, jeton stocké **haché** comme les refresh tokens      |
+| `game_sessions`       | Séance : titre, description, date/heure, lieu, statut             |
+| `session_attendances` | Réponses des joueurs (`yes` / `no`), une ligne par joueur         |
+| `device_tokens`       | Jetons FCM, un par appareil                                       |
+| `notifications`       | Historique consultable dans l'app                                 |
 
-Les champs reproduisent exactement les modèles Freezed de l'app
-(`Character`, `CharacterStat`, `CharacterResource`, `InventoryItem`).
+Les champs des personnages reproduisent exactement les modèles Freezed de l'app
+(`Character`, `CharacterStat`, `CharacterResource`, `InventoryItem`). Les
+tables, elles, n'ont pas d'équivalent local : elles sont partagées entre
+plusieurs comptes et ne vivent que sur le serveur.
 
 ---
 
@@ -117,8 +134,9 @@ App Flutter                    API Questbook                 Google
 
 ## Endpoints
 
-Préfixe : `/api/v1`. Toutes les routes `characters` exigent l'en-tête
-`Authorization: Bearer <accessToken>`.
+Préfixe : `/api/v1`. Toutes les routes exigent l'en-tête
+`Authorization: Bearer <accessToken>`, à la seule exception de la page web
+d'acceptation d'invitation, servie hors préfixe (voir plus bas).
 
 ### Authentification
 
@@ -155,6 +173,44 @@ Les stats et ressources sont adressées par leur **clé métier** (`bibliotheque
 `pv`) et non par un identifiant de ligne, exactement comme le fait déjà
 `CharacterRepository` côté Flutter.
 
+### Tables et invitations
+
+| Méthode  | Route                                    | Description                                  |
+| -------- | ---------------------------------------- | -------------------------------------------- |
+| `GET`    | `/tables`                                | Tables dont on est membre                    |
+| `POST`   | `/tables`                                | Création ; le créateur devient MJ (201)      |
+| `GET`    | `/tables/:id`                            | Détail : membres, invitations, prochaine date |
+| `PATCH`  | `/tables/:id`                            | Titre et univers (MJ)                        |
+| `DELETE` | `/tables/:id`                            | Dissolution (MJ, 204)                        |
+| `DELETE` | `/tables/:id/members/me`                 | Quitter la table (204)                       |
+| `DELETE` | `/tables/:id/members/:userId`            | Exclure un joueur (MJ, 204)                  |
+| `POST`   | `/tables/:id/invitations`                | Inviter par e-mail (MJ, 201)                 |
+| `DELETE` | `/tables/:id/invitations/:invitationId`  | Révoquer une invitation (MJ, 204)            |
+| `GET`    | `/invitations`                           | Invitations reçues, en attente               |
+| `POST`   | `/invitations/:id/accept`                | Accepter depuis l'app                        |
+| `POST`   | `/invitations/:id/decline`               | Décliner (204)                               |
+
+### Sessions et participation
+
+| Méthode  | Route                          | Description                              |
+| -------- | ------------------------------ | ---------------------------------------- |
+| `GET`    | `/tables/:id/sessions`         | Sessions de la table                     |
+| `POST`   | `/tables/:id/sessions`         | Proposer une session (MJ, 201)           |
+| `GET`    | `/sessions/:id`                | Détail et réponses de chacun             |
+| `PATCH`  | `/sessions/:id`                | Titre, description, date, lieu (MJ)      |
+| `DELETE` | `/sessions/:id`                | Annulation — la session reste visible    |
+| `PUT`    | `/sessions/:id/attendance`     | `{ "status": "yes" \| "no" }`, modifiable |
+
+### Notifications et appareils
+
+| Méthode  | Route                       | Description                                |
+| -------- | --------------------------- | ------------------------------------------ |
+| `GET`    | `/notifications`            | Historique + `unreadCount`                 |
+| `POST`   | `/notifications/read`       | Marquer une liste d'identifiants lue (204) |
+| `POST`   | `/notifications/read-all`   | Tout marquer lu (204)                      |
+| `PUT`    | `/devices`                  | Enregistrer un jeton FCM (204)             |
+| `DELETE` | `/devices/:token`           | Retirer un jeton, à la déconnexion (204)   |
+
 `GET /health` (hors préfixe) vérifie aussi la connexion PostgreSQL.
 
 ### Forme des erreurs
@@ -166,6 +222,67 @@ Les stats et ressources sont adressées par leur **clé métier** (`bibliotheque
 
 Codes : `VALIDATION_ERROR`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`,
 `CONFLICT`, `INTERNAL_ERROR`.
+
+---
+
+## Tables, sessions et notifications
+
+Une table de jeu est un objet **partagé** : contrairement aux personnages, elle
+n'est jamais stockée sur l'appareil et l'app la lit toujours en ligne. Cela
+évite d'avoir à résoudre des conflits sur des données que plusieurs personnes
+modifient en même temps.
+
+### Invitations
+
+```
+MJ ──POST /tables/:id/invitations {email}──▶ API
+                                             │  l'e-mail a-t-il un compte ?
+                                             │  non → 404 "aucun joueur inscrit"
+                                             │  oui → invitation + notification
+                                             ├──▶ Resend : lien /invitations/:token
+Joueur ──GET /invitations/:token────────────▶│  page HTML avec un bouton
+Joueur ──POST /invitations/:token/accept────▶│  crée le TableMember
+                                             └──▶ notification au MJ
+```
+
+Deux garde-fous expliquent la forme de ce flux :
+
+- **Seuls les comptes existants sont invitables.** L'invitation porte donc
+  toujours l'identifiant du joueur, ce qui permet au lien e-mail de fonctionner
+  sans connexion : posséder le jeton fait autorité, comme pour n'importe quelle
+  invitation par e-mail.
+- **Le lien n'accepte rien en `GET`.** Les clients mail préchargent les liens ;
+  seul le `POST` du bouton engage le joueur. Le jeton suit exactement le motif
+  des refresh tokens : 48 octets aléatoires envoyés, hachage SHA-256 stocké, et
+  ajouté à la liste `redact` du logger.
+
+L'invitation reste par ailleurs visible et acceptable directement dans l'app.
+
+### Autorisations
+
+Une garde d'appartenance renvoie **404** — et non 403 — pour une table dont on
+n'est pas membre, comme pour les personnages : un appelant ne doit pas pouvoir
+deviner quels identifiants existent. Une fois l'appartenance établie, un joueur
+qui tente une action réservée au MJ reçoit un 403 : cacher la raison n'aurait
+plus d'intérêt.
+
+### Notifications
+
+Cinq événements : invitation reçue, invitation acceptée, session créée, session
+modifiée (date ou lieu **seulement** — corriger une faute dans la description ne
+réveille personne), et participation confirmée ou changée.
+
+Pour chacun, la ligne `notifications` est écrite **dans la transaction** de la
+modification qui la justifie : c'est la source de vérité, et l'historique
+in-app est donc toujours juste. L'e-mail et le push partent ensuite au mieux,
+après le commit, sans jamais faire échouer la requête. Un jeton d'appareil que
+Firebase déclare mort est supprimé au passage.
+
+`EmailSender` et `PushSender` sont deux interfaces étroites, calquées sur le
+motif `GoogleVerifier`, injectables via `BuildAppOptions`. **Sans clé Resend ni
+compte de service Firebase, les deux se contentent de journaliser ce qu'elles
+auraient envoyé** : tout le parcours d'invitation reste utilisable en local
+sans aucun compte tiers.
 
 ---
 
@@ -266,6 +383,49 @@ déconnecterait tous les utilisateurs, et changer `POSTGRES_PASSWORD` après la
 création du volume interdirait à l'API l'accès à sa propre base. Pour modifier
 une valeur, éditer le fichier à la main puis relancer `deploy.sh`.
 
+### E-mails d'invitation (Resend)
+
+Sans `RESEND_API_KEY`, les invitations restent parfaitement fonctionnelles dans
+l'app — seul l'e-mail est remplacé par une ligne de log. Pour les envoyer pour
+de vrai :
+
+1. Créer un compte sur [resend.com](https://resend.com) (palier gratuit :
+   3 000 e-mails par mois, 100 par jour).
+2. Y ajouter un **sous-domaine** d'envoi, `mail.nextuscorp.com` plutôt que le
+   domaine racine : un problème de réputation reste ainsi cantonné aux e-mails
+   transactionnels et n'affecte pas le courrier du domaine principal.
+3. Publier chez OVH les enregistrements DNS que Resend affiche (DKIM en `TXT`,
+   `MX` de retour, et `TXT` SPF), puis lancer la vérification.
+4. Renseigner sur le VPS, dans `/opt/questbook/.env` :
+
+   ```
+   RESEND_API_KEY=re_xxxxxxxx
+   EMAIL_FROM=Questbook <invitations@mail.nextuscorp.com>
+   ```
+
+### Notifications push (Firebase)
+
+Sans compte de service, l'historique in-app continue de fonctionner et seul le
+push est ignoré. Pour l'activer :
+
+1. Console Firebase du projet `questbook-48540` → *Paramètres du projet* →
+   *Comptes de service* → **Générer une nouvelle clé privée** (JSON).
+2. Recopier trois de ses champs dans `/opt/questbook/.env`, en **conservant les
+   `\n` échappés** de la clé privée tels quels :
+
+   ```
+   FIREBASE_PROJECT_ID=questbook-48540
+   FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxxxx@questbook-48540.iam.gserviceaccount.com
+   FIREBASE_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----\n
+   ```
+
+3. `./deploy/deploy.sh` pour redémarrer avec la nouvelle configuration.
+
+> L'envoi passe par FCM HTTP v1 avec un jeton OAuth signé par
+> `google-auth-library`, déjà présent pour vérifier les ID tokens Google.
+> `firebase-admin` aurait apporté des dizaines de mégaoctets pour le seul
+> endpoint réellement appelé ici.
+
 La pile Docker Compose contient trois services :
 
 - **`db`** — PostgreSQL 17, volume persistant, healthcheck ;
@@ -293,8 +453,8 @@ interne et ne sont **jamais** exposés à Internet. UFW n'a donc besoin que de :
 
 ## Tests
 
-26 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
-une doublure pour Google et une vraie base PostgreSQL.
+62 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
+des doublures pour Google, Resend et FCM, et une vraie base PostgreSQL.
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d
@@ -306,8 +466,13 @@ npm test
 Couverture : création de compte et réutilisation, rotation et rejeu du refresh
 token, hachage des jetons, isolation stricte entre comptes (404 plutôt que 403
 pour ne pas divulguer l'existence d'un identifiant), CRUD inventaire, bornage
-des ressources, et les quatre scénarios de synchronisation (création, remplacement
-d'agrégat, conflit périmé, propagation des tombstones).
+des ressources, les quatre scénarios de synchronisation (création, remplacement
+d'agrégat, conflit périmé, propagation des tombstones), et tout le périmètre
+des tables : invitation d'une adresse inconnue refusée, acceptation par le lien
+web et depuis l'app, rejeu impossible, révocation, autorisations MJ/joueur,
+création et modification de sessions, changements de participation, et
+vérification que chaque événement produit bien la notification et l'e-mail
+attendus via les doublures.
 
 Les suites partagent une base et la vident entre chaque test : elles s'exécutent
 donc en série (`fileParallelism: false`).
