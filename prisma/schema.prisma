@@ -70,10 +70,11 @@ model Character {
   updatedAt   DateTime  @map("updated_at")
   deletedAt   DateTime? @map("deleted_at")
 
-  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  stats     CharacterStat[]
-  resources CharacterResource[]
-  inventory InventoryItem[]
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stats       CharacterStat[]
+  resources   CharacterResource[]
+  inventory   InventoryItem[]
+  attendances SessionAttendance[]
 
   @@index([userId, updatedAt])
   @@map("characters")
@@ -211,18 +212,25 @@ model GameSession {
 /// A missing row means "has not answered yet", which is deliberately distinct
 /// from an explicit "no": the GM needs to tell the two apart when deciding
 /// whether to go ahead with a session.
+/// The character is optional and can be filled in long after the answer: a
+/// player confirms first and decides who they are playing later. `SetNull`
+/// rather than `Cascade` because losing a character must not erase the fact
+/// that its owner had said they would come.
 model SessionAttendance {
   id          String   @id @default(uuid())
   sessionId   String   @map("session_id")
   userId      String   @map("user_id")
   status      String
+  characterId String?  @map("character_id")
   respondedAt DateTime @default(now()) @map("responded_at")
 
-  session GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session   GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  character Character?  @relation(fields: [characterId], references: [id], onDelete: SetNull)
 
   @@unique([sessionId, userId])
   @@index([userId])
+  @@index([characterId])
   @@map("session_attendances")
 }
 

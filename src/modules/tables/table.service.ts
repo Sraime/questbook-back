@@ -169,6 +169,91 @@ export class TableService {
     });
   }
 
+  /// Handing over the table. The two roles are swapped rather than duplicated:
+  /// a table has exactly one game master, and the outgoing one stays as a
+  /// player.
+  ///
+  /// Past sessions are left exactly as they were. The new game master may well
+  /// have played one with a character, and that happened. Only sessions still
+  /// ahead of us lose their attendance, because from now on they will be
+  /// running those rather than playing them.
+  async transferGameMaster(
+    userId: string,
+    tableId: string,
+    memberUserId: string,
+  ): Promise<GameTableDto> {
+    await requireGameMaster(this.prisma, userId, tableId);
+
+    if (memberUserId === userId) {
+      throw badRequest('You are already the game master of this table');
+    }
+
+    const successor = await this.prisma.tableMember.findUnique({
+      where: { tableId_userId: { tableId, userId: memberUserId } },
+      include: { user: true },
+    });
+
+    if (!successor) {
+      throw notFound('Member not found');
+    }
+
+    const table = await this.prisma.gameTable.findUniqueOrThrow({
+      where: { id: tableId },
+      select: { title: true },
+    });
+
+    const outgoing = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+    });
+
+    const drafts: NotificationDraft[] = [
+      {
+        userId: memberUserId,
+        type: 'game_master_transferred',
+        title: `Tu es MJ · ${table.title}`,
+        body:
+          `${displayNameOf(toTableUserDto(outgoing))} te confie la table. ` +
+          'À toi d’organiser les sessions.',
+        tableId,
+      },
+    ];
+
+    const row = await this.prisma.$transaction(async (tx) => {
+      await tx.tableMember.update({
+        where: { tableId_userId: { tableId, userId } },
+        data: { role: 'player' },
+      });
+
+      await tx.tableMember.update({
+        where: { tableId_userId: { tableId, userId: memberUserId } },
+        data: { role: 'gm' },
+      });
+
+      // `ownerId` is denormalised from the member roles and is what the
+      // notification code reads to find the game master, so the two must move
+      // together.
+      const updated = await tx.gameTable.update({
+        where: { id: tableId },
+        data: { ownerId: memberUserId },
+        include: tableInclude,
+      });
+
+      await tx.sessionAttendance.deleteMany({
+        where: {
+          userId: memberUserId,
+          session: { tableId, startsAt: { gt: new Date() } },
+        },
+      });
+
+      await this.notifications.record(tx, drafts);
+      return updated;
+    });
+
+    this.notifications.deliver(drafts);
+
+    return this.toDto(row, userId);
+  }
+
   async removeMember(
     userId: string,
     tableId: string,

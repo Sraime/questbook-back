@@ -91,7 +91,7 @@ garde une identité unique sur tous les appareils, sans table de correspondance.
 | `table_members`       | Appartenance et rôle (`gm` / `player`)                            |
 | `table_invitations`   | Invitations, jeton stocké **haché** comme les refresh tokens      |
 | `game_sessions`       | Séance : titre, description, date/heure, lieu, statut             |
-| `session_attendances` | Réponses des joueurs (`yes` / `no`), une ligne par joueur         |
+| `session_attendances` | Réponses des joueurs (`yes` / `no`) et personnage joué, optionnel |
 | `device_tokens`       | Jetons FCM, un par appareil                                       |
 | `notifications`       | Historique consultable dans l'app                                 |
 
@@ -184,6 +184,7 @@ Les stats et ressources sont adressées par leur **clé métier** (`bibliotheque
 | `DELETE` | `/tables/:id`                            | Dissolution (MJ, 204)                        |
 | `DELETE` | `/tables/:id/members/me`                 | Quitter la table (204)                       |
 | `DELETE` | `/tables/:id/members/:userId`            | Exclure un joueur (MJ, 204)                  |
+| `PUT`    | `/tables/:id/game-master`                | Confier la table à un joueur (MJ)            |
 | `POST`   | `/tables/:id/invitations`                | Inviter par e-mail (MJ, 201)                 |
 | `DELETE` | `/tables/:id/invitations/:invitationId`  | Révoquer une invitation (MJ, 204)            |
 | `GET`    | `/invitations`                           | Invitations reçues, en attente               |
@@ -192,14 +193,29 @@ Les stats et ressources sont adressées par leur **clé métier** (`bibliotheque
 
 ### Sessions et participation
 
-| Méthode  | Route                          | Description                              |
-| -------- | ------------------------------ | ---------------------------------------- |
-| `GET`    | `/tables/:id/sessions`         | Sessions de la table                     |
-| `POST`   | `/tables/:id/sessions`         | Proposer une session (MJ, 201)           |
-| `GET`    | `/sessions/:id`                | Détail et réponses de chacun             |
-| `PATCH`  | `/sessions/:id`                | Titre, description, date, lieu (MJ)      |
-| `DELETE` | `/sessions/:id`                | Annulation — la session reste visible    |
-| `PUT`    | `/sessions/:id/attendance`     | `{ "status": "yes" \| "no" }`, modifiable |
+| Méthode  | Route                                          | Description                                       |
+| -------- | ---------------------------------------------- | ------------------------------------------------- |
+| `GET`    | `/tables/:id/sessions`                         | Sessions de la table                              |
+| `POST`   | `/tables/:id/sessions`                         | Proposer une session (MJ, 201)                    |
+| `GET`    | `/sessions/:id`                                | Détail et réponses de chacun                      |
+| `PATCH`  | `/sessions/:id`                                | Titre, description, date, lieu (MJ)               |
+| `DELETE` | `/sessions/:id`                                | Annulation — la session reste visible             |
+| `PUT`    | `/sessions/:id/attendance`                     | `{ "status", "characterId"? }`, modifiable        |
+| `PUT`    | `/sessions/:id/attendance/character`           | Poser, changer ou retirer le personnage           |
+| `GET`    | `/sessions/:id/attendances/:userId/character`  | Fiche d'un participant, lisible par la table      |
+
+Le MJ n'est pas un participant : il anime la séance, ne répond pas et n'est pas
+compté parmi les joueurs attendus. `PUT /sessions/:id/attendance` lui répond 403.
+
+Le personnage est facultatif et dissocié de la réponse : un joueur confirme
+d'abord et dit plus tard avec qui il vient. Les deux gestes notifient le MJ
+séparément (`attendance_changed`, `attendance_character_changed`), parce qu'ils
+lui apprennent deux choses différentes.
+
+Inscrire un personnage à une session l'ouvre en lecture aux autres membres de la
+table, et à eux seuls. C'est la seule brèche dans l'isolement par compte des
+personnages, et elle passe par la route ci-dessus : `/characters/:id` reste
+strictement privé à son propriétaire.
 
 ### Notifications et appareils
 
@@ -258,6 +274,17 @@ Deux garde-fous expliquent la forme de ce flux :
 
 L'invitation reste par ailleurs visible et acceptable directement dans l'app.
 
+### Transmission du rôle de MJ
+
+`PUT /tables/:id/game-master` **échange** les deux rôles au lieu d'en dupliquer
+un : une table a exactement un MJ, et le sortant redevient joueur. `ownerId` est
+mis à jour dans la même transaction, puisque c'est lui que lit le code des
+notifications pour trouver le MJ.
+
+Le nouveau MJ est retiré des participants des sessions **encore à venir**, parce
+qu'il va désormais les animer. Les sessions passées ne sont pas retouchées : il y
+avait joué, avec un personnage, et cela a eu lieu.
+
 ### Autorisations
 
 Une garde d'appartenance renvoie **404** — et non 403 — pour une table dont on
@@ -266,11 +293,18 @@ deviner quels identifiants existent. Une fois l'appartenance établie, un joueur
 qui tente une action réservée au MJ reçoit un 403 : cacher la raison n'aurait
 plus d'intérêt.
 
+Une exception assumée à l'isolement par compte : la fiche d'un personnage inscrit
+à une session est lisible par les autres membres de cette table. Elle passe par
+`readSharedCharacter`, une fonction dont le nom annonce qu'elle ne vérifie
+aucune propriété — l'autorisation est tenue par l'appartenance à la session, au
+point d'appel. `requireOwned` reste inchangé et `/characters/:id` privé.
+
 ### Notifications
 
-Cinq événements : invitation reçue, invitation acceptée, session créée, session
+Huit événements : invitation reçue, invitation acceptée, session créée, session
 modifiée (date ou lieu **seulement** — corriger une faute dans la description ne
-réveille personne), et participation confirmée ou changée.
+réveille personne), session annulée, participation confirmée ou changée,
+personnage renseigné ou changé, et transmission du rôle de MJ.
 
 Pour chacun, la ligne `notifications` est écrite **dans la transaction** de la
 modification qui la justifie : c'est la source de vérité, et l'historique

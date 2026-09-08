@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import {
+  characterPayload,
   createTestApp,
   prisma,
   resetDatabase,
@@ -50,6 +51,47 @@ async function scheduleSession(
 
   expect(response.statusCode).toBe(201);
   return response.json();
+}
+
+async function createCharacter(
+  as: SignedInUser,
+  overrides: Record<string, unknown> = {},
+) {
+  const response = await context.app.inject({
+    method: 'POST',
+    url: '/api/v1/characters',
+    headers: as.authHeader,
+    payload: characterPayload(overrides),
+  });
+
+  expect(response.statusCode).toBe(201);
+  return response.json();
+}
+
+async function answer(
+  as: SignedInUser,
+  sessionId: string,
+  payload: Record<string, unknown>,
+) {
+  return context.app.inject({
+    method: 'PUT',
+    url: `/api/v1/sessions/${sessionId}/attendance`,
+    headers: as.authHeader,
+    payload,
+  });
+}
+
+async function setCharacter(
+  as: SignedInUser,
+  sessionId: string,
+  characterId: string | null,
+) {
+  return context.app.inject({
+    method: 'PUT',
+    url: `/api/v1/sessions/${sessionId}/attendance/character`,
+    headers: as.authHeader,
+    payload: { characterId },
+  });
 }
 
 async function notificationTypes(user: SignedInUser): Promise<string[]> {
@@ -252,6 +294,192 @@ describe('Participation', () => {
     expect(asGm.json().myStatus).toBeNull();
   });
 
+  it('refuses an answer from the game master, who runs the session', async () => {
+    const { gm, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+
+    const response = await context.app.inject({
+      method: 'PUT',
+      url: `/api/v1/sessions/${session.id}/attendance`,
+      headers: gm.authHeader,
+      payload: { status: 'yes' },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(await prisma.sessionAttendance.count()).toBe(0);
+  });
+
+  it('accepts an answer that already names a character', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+    const character = await createCharacter(player, { name: 'Ernest Blackwood' });
+
+    const response = await answer(player, session.id, {
+      status: 'yes',
+      characterId: character.id,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().attendances[0].character).toMatchObject({
+      id: character.id,
+      name: 'Ernest Blackwood',
+    });
+  });
+
+  it('accepts an answer with no character, then names one later', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+    const character = await createCharacter(player);
+
+    const confirmed = await answer(player, session.id, { status: 'yes' });
+    expect(confirmed.json().attendances[0].character).toBeNull();
+
+    const named = await setCharacter(player, session.id, character.id);
+
+    expect(named.statusCode).toBe(200);
+    expect(named.json().attendances[0].character.id).toBe(character.id);
+    expect(await notificationTypes(gm)).toContain('attendance_character_changed');
+  });
+
+  it('keeps the character when the answer is sent again without one', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+    const character = await createCharacter(player);
+
+    await answer(player, session.id, { status: 'yes', characterId: character.id });
+    const again = await answer(player, session.id, { status: 'no' });
+
+    expect(again.json().attendances[0].character.id).toBe(character.id);
+  });
+
+  it('detaches the character when asked explicitly', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+    const character = await createCharacter(player);
+
+    await answer(player, session.id, { status: 'yes', characterId: character.id });
+    const detached = await setCharacter(player, session.id, null);
+
+    expect(detached.statusCode).toBe(200);
+    expect(detached.json().attendances[0].character).toBeNull();
+  });
+
+  it('refuses a character belonging to someone else', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+    const someoneElse = await signIn(context, 'stranger');
+    const theirs = await createCharacter(someoneElse);
+
+    const response = await answer(player, session.id, {
+      status: 'yes',
+      characterId: theirs.id,
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(await prisma.sessionAttendance.count()).toBe(0);
+  });
+
+  it('refuses to name a character before answering at all', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+    const character = await createCharacter(player);
+
+    const response = await setCharacter(player, session.id, character.id);
+
+    expect(response.statusCode).toBe(409);
+  });
+
+  it('reads a deleted character as no character at all', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+    const character = await createCharacter(player);
+
+    await answer(player, session.id, { status: 'yes', characterId: character.id });
+
+    await context.app.inject({
+      method: 'DELETE',
+      url: `/api/v1/characters/${character.id}`,
+      headers: player.authHeader,
+    });
+
+    const asGm = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/sessions/${session.id}`,
+      headers: gm.authHeader,
+    });
+
+    // The answer survives its character: the player still said they would come.
+    expect(asGm.json().attendances).toHaveLength(1);
+    expect(asGm.json().attendances[0].character).toBeNull();
+  });
+
+  it('opens a registered character to the others at the table', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+    const character = await createCharacter(player);
+
+    await answer(player, session.id, { status: 'yes', characterId: character.id });
+
+    const asGm = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/sessions/${session.id}/attendances/${player.userId}/character`,
+      headers: gm.authHeader,
+    });
+
+    expect(asGm.statusCode).toBe(200);
+    expect(asGm.json().name).toBe('Ernest Blackwood');
+    // The whole sheet, not just a name: consulting means reading it.
+    expect(asGm.json().stats).toHaveLength(2);
+    expect(asGm.json().inventory).toHaveLength(1);
+  });
+
+  it('keeps a registered character away from outsiders', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+    const character = await createCharacter(player);
+    await answer(player, session.id, { status: 'yes', characterId: character.id });
+
+    const outsider = await signIn(context, 'outsider');
+    const response = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/sessions/${session.id}/attendances/${player.userId}/character`,
+      headers: outsider.authHeader,
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('says nothing about a player who has not named a character', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+    await answer(player, session.id, { status: 'yes' });
+
+    const response = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/sessions/${session.id}/attendances/${player.userId}/character`,
+      headers: gm.authHeader,
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('still scopes the character module to its owner', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+    const character = await createCharacter(player);
+    await answer(player, session.id, { status: 'yes', characterId: character.id });
+
+    // Sharing a session opens the sheet through the session route only; the
+    // character endpoints stay private to their owner.
+    const direct = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/characters/${character.id}`,
+      headers: gm.authHeader,
+    });
+
+    expect(direct.statusCode).toBe(404);
+  });
+
   it('refuses an answer to a cancelled session', async () => {
     const { gm, player, tableId } = await tableWithPlayer();
     const session = await scheduleSession(gm, tableId);
@@ -270,6 +498,116 @@ describe('Participation', () => {
     });
 
     expect(response.statusCode).toBe(409);
+  });
+});
+
+describe('Game master transfer', () => {
+  async function transferTo(
+    gm: SignedInUser,
+    tableId: string,
+    memberUserId: string,
+  ) {
+    return context.app.inject({
+      method: 'PUT',
+      url: `/api/v1/tables/${tableId}/game-master`,
+      headers: gm.authHeader,
+      payload: { userId: memberUserId },
+    });
+  }
+
+  it('swaps the two roles rather than adding a second game master', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+
+    const response = await transferTo(gm, tableId, player.userId);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().ownerId).toBe(player.userId);
+    // The caller is the outgoing game master, so their own role now reads
+    // `player`.
+    expect(response.json().role).toBe('player');
+
+    const roles = await prisma.tableMember.findMany({
+      where: { tableId },
+      select: { userId: true, role: true },
+    });
+    expect(roles).toHaveLength(2);
+    expect(roles.find((r) => r.userId === player.userId)?.role).toBe('gm');
+    expect(roles.find((r) => r.userId === gm.userId)?.role).toBe('player');
+  });
+
+  it('notifies the new game master', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+
+    await transferTo(gm, tableId, player.userId);
+
+    expect(await notificationTypes(player)).toContain('game_master_transferred');
+  });
+
+  it('drops the new game master out of the sessions still ahead', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const upcoming = await scheduleSession(gm, tableId);
+    await answer(player, upcoming.id, { status: 'yes' });
+
+    await transferTo(gm, tableId, player.userId);
+
+    const rows = await prisma.sessionAttendance.findMany({
+      where: { sessionId: upcoming.id },
+    });
+    expect(rows).toEqual([]);
+  });
+
+  it('leaves past sessions exactly as they were played', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const past = await scheduleSession(gm, tableId, {
+      startsAt: '2026-01-05T19:00:00.000Z',
+    });
+    const character = await createCharacter(player);
+    await answer(player, past.id, { status: 'yes', characterId: character.id });
+
+    await transferTo(gm, tableId, player.userId);
+
+    // They played that evening, with that character. Becoming game master
+    // afterwards does not rewrite it.
+    const rows = await prisma.sessionAttendance.findMany({
+      where: { sessionId: past.id },
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].characterId).toBe(character.id);
+  });
+
+  it('refuses a transfer asked by a player', async () => {
+    const { player, tableId } = await tableWithPlayer();
+
+    const response = await context.app.inject({
+      method: 'PUT',
+      url: `/api/v1/tables/${tableId}/game-master`,
+      headers: player.authHeader,
+      payload: { userId: player.userId },
+    });
+
+    expect(response.statusCode).toBe(403);
+  });
+
+  it('refuses a transfer to someone who is not at the table', async () => {
+    const { gm, tableId } = await tableWithPlayer();
+    const outsider = await signIn(context, 'outsider');
+
+    const response = await transferTo(gm, tableId, outsider.userId);
+
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('lets the new game master schedule, and the old one answer', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    await transferTo(gm, tableId, player.userId);
+
+    // Roles really did move: the former player now schedules, and the former
+    // game master answers like anyone else.
+    const session = await scheduleSession(player, tableId);
+    const response = await answer(gm, session.id, { status: 'yes' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().myStatus).toBe('yes');
   });
 });
 

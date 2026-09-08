@@ -1,5 +1,9 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
-import { conflict, notFound } from '../../lib/errors.js';
+import { conflict, forbidden, notFound } from '../../lib/errors.js';
+import {
+  readSharedCharacter,
+  type CharacterDto,
+} from '../characters/character.service.js';
 import type {
   NotificationDraft,
   NotificationService,
@@ -14,14 +18,26 @@ import {
 import type {
   AttendanceStatus,
   CreateSessionInput,
+  MemberRole,
   PatchSessionInput,
 } from './table.schemas.js';
+
+/// Just enough of a character to name it in the answers list. The full sheet
+/// lives behind its own endpoint.
+export interface AttendanceCharacterDto {
+  id: string;
+  name: string;
+  occupation: string | null;
+}
 
 export interface AttendanceDto {
   userId: string;
   status: AttendanceStatus;
   respondedAt: string;
   user: TableUserDto;
+  /// Who they are playing, when they have said. Answering and choosing a
+  /// character are two separate moments.
+  character: AttendanceCharacterDto | null;
 }
 
 export interface GameSessionDto {
@@ -37,10 +53,17 @@ export interface GameSessionDto {
   attendances: AttendanceDto[];
   /// The caller's own answer, or null while they have not replied.
   myStatus: AttendanceStatus | null;
+  /// The caller's own character for this session, or null while they have not
+  /// named one. Sent for the same reason as [myStatus]: the client should not
+  /// have to hunt through [attendances] for its own row.
+  myCharacter: AttendanceCharacterDto | null;
 }
 
 const sessionInclude = {
-  attendances: { include: { user: true }, orderBy: { respondedAt: 'asc' } },
+  attendances: {
+    include: { user: true, character: true },
+    orderBy: { respondedAt: 'asc' },
+  },
 } satisfies Prisma.GameSessionInclude;
 
 type SessionWithRelations = Prisma.GameSessionGetPayload<{
@@ -80,8 +103,8 @@ export class SessionService {
   }
 
   async get(userId: string, sessionId: string): Promise<GameSessionDto> {
-    const row = await this.requireVisible(userId, sessionId);
-    return toSessionDto(row, userId);
+    const { session } = await this.requireVisible(userId, sessionId);
+    return toSessionDto(session, userId);
   }
 
   async create(
@@ -149,7 +172,7 @@ export class SessionService {
     sessionId: string,
     input: PatchSessionInput,
   ): Promise<GameSessionDto> {
-    const existing = await this.requireVisible(userId, sessionId);
+    const { session: existing } = await this.requireVisible(userId, sessionId);
     await requireGameMaster(this.prisma, userId, existing.tableId);
 
     const table = await this.prisma.gameTable.findUniqueOrThrow({
@@ -200,7 +223,7 @@ export class SessionService {
   }
 
   async cancel(userId: string, sessionId: string): Promise<GameSessionDto> {
-    const existing = await this.requireVisible(userId, sessionId);
+    const { session: existing } = await this.requireVisible(userId, sessionId);
     await requireGameMaster(this.prisma, userId, existing.tableId);
 
     if (existing.status === 'cancelled') {
@@ -243,15 +266,28 @@ export class SessionService {
 
   /// Answering and changing one's mind are the same operation: the game master
   /// is notified either way, which is the whole point of the feature.
+  ///
+  /// The game master runs the evening rather than attending it, so they have
+  /// nothing to answer here and are never counted among the players expected
+  /// to reply.
   async setAttendance(
     userId: string,
     sessionId: string,
     status: AttendanceStatus,
+    characterId?: string | null,
   ): Promise<GameSessionDto> {
-    const existing = await this.requireVisible(userId, sessionId);
+    const { session: existing, role } = await this.requireVisible(userId, sessionId);
+
+    if (role === 'gm') {
+      throw forbidden('The game master runs the session rather than attending it');
+    }
 
     if (existing.status === 'cancelled') {
       throw conflict('This session is cancelled');
+    }
+
+    if (characterId) {
+      await this.requireOwnCharacter(userId, characterId);
     }
 
     const table = await this.prisma.gameTable.findUniqueOrThrow({
@@ -259,31 +295,33 @@ export class SessionService {
       select: { title: true, ownerId: true },
     });
 
-    const player = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
-    const playerName = toTableUserDto(player).displayName ?? player.email;
+    const playerName = await this.playerName(userId);
 
-    const drafts: NotificationDraft[] =
-      table.ownerId === userId
-        ? []
-        : [
-            {
-              userId: table.ownerId,
-              type: 'attendance_changed',
-              title: `Réponse · ${table.title}`,
-              body:
-                status === 'yes'
-                  ? `${playerName} sera présent pour « ${existing.title} »`
-                  : `${playerName} ne sera pas là pour « ${existing.title} »`,
-              tableId: existing.tableId,
-              sessionId,
-            },
-          ];
+    const drafts: NotificationDraft[] = [
+      {
+        userId: table.ownerId,
+        type: 'attendance_changed',
+        title: `Réponse · ${table.title}`,
+        body:
+          status === 'yes'
+            ? `${playerName} sera présent pour « ${existing.title} »`
+            : `${playerName} ne sera pas là pour « ${existing.title} »`,
+        tableId: existing.tableId,
+        sessionId,
+      },
+    ];
 
     const row = await this.prisma.$transaction(async (tx) => {
       await tx.sessionAttendance.upsert({
         where: { sessionId_userId: { sessionId, userId } },
-        create: { sessionId, userId, status },
-        update: { status, respondedAt: new Date() },
+        create: { sessionId, userId, status, characterId: characterId ?? null },
+        update: {
+          status,
+          respondedAt: new Date(),
+          // Omitting the field leaves an earlier choice alone; only an explicit
+          // null detaches it.
+          ...(characterId !== undefined ? { characterId } : {}),
+        },
       });
 
       await this.notifications.record(tx, drafts);
@@ -299,23 +337,137 @@ export class SessionService {
     return toSessionDto(row, userId);
   }
 
+  /// Naming the character one is playing, or changing one's mind about it,
+  /// without touching the answer itself. Separate from [setAttendance] because
+  /// the game master cares about it for a different reason: not who is coming,
+  /// but who is at the table.
+  async setAttendanceCharacter(
+    userId: string,
+    sessionId: string,
+    characterId: string | null,
+  ): Promise<GameSessionDto> {
+    const { session: existing, role } = await this.requireVisible(userId, sessionId);
+
+    if (role === 'gm') {
+      throw forbidden('The game master runs the session rather than attending it');
+    }
+
+    if (existing.status === 'cancelled') {
+      throw conflict('This session is cancelled');
+    }
+
+    const attendance = existing.attendances.find((row) => row.userId === userId);
+    if (!attendance) {
+      throw conflict('Answer the session before saying who you are playing');
+    }
+
+    const character = characterId
+      ? await this.requireOwnCharacter(userId, characterId)
+      : null;
+
+    const table = await this.prisma.gameTable.findUniqueOrThrow({
+      where: { id: existing.tableId },
+      select: { title: true, ownerId: true },
+    });
+
+    const playerName = await this.playerName(userId);
+
+    const drafts: NotificationDraft[] = [
+      {
+        userId: table.ownerId,
+        type: 'attendance_character_changed',
+        title: `Personnage · ${table.title}`,
+        body: character
+          ? `${playerName} jouera ${character.name} pour « ${existing.title} »`
+          : `${playerName} n'a plus de personnage pour « ${existing.title} »`,
+        tableId: existing.tableId,
+        sessionId,
+      },
+    ];
+
+    const row = await this.prisma.$transaction(async (tx) => {
+      await tx.sessionAttendance.update({
+        where: { id: attendance.id },
+        data: { characterId },
+      });
+
+      await this.notifications.record(tx, drafts);
+
+      return tx.gameSession.findUniqueOrThrow({
+        where: { id: sessionId },
+        include: sessionInclude,
+      });
+    });
+
+    this.notifications.deliver(drafts);
+
+    return toSessionDto(row, userId);
+  }
+
+  /// A player's sheet is normally private to them; registering it for a session
+  /// opens it to the others at that table, and to nobody else. Membership of
+  /// the session's table is the whole authorisation.
+  async getAttendanceCharacter(
+    userId: string,
+    sessionId: string,
+    memberId: string,
+  ): Promise<CharacterDto> {
+    const { session } = await this.requireVisible(userId, sessionId);
+
+    const attendance = session.attendances.find((row) => row.userId === memberId);
+    if (!attendance?.characterId) {
+      throw notFound('This player has not said who they are playing');
+    }
+
+    const character = await readSharedCharacter(this.prisma, attendance.characterId);
+    if (!character) {
+      throw notFound('Character not found');
+    }
+
+    return character;
+  }
+
+  /// 404 rather than 403, like the character module: a player must not be able
+  /// to probe which character ids exist by attaching them to a session.
+  private async requireOwnCharacter(
+    userId: string,
+    characterId: string,
+  ): Promise<{ name: string }> {
+    const character = await this.prisma.character.findFirst({
+      where: { id: characterId, userId, deletedAt: null },
+      select: { name: true },
+    });
+
+    if (!character) {
+      throw notFound('Character not found');
+    }
+
+    return character;
+  }
+
+  private async playerName(userId: string): Promise<string> {
+    const player = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    return toTableUserDto(player).displayName ?? player.email;
+  }
+
   /// Membership of the parent table is what grants access to a session, so the
-  /// lookup and the guard always travel together.
+  /// lookup and the guard always travel together. The role comes back with the
+  /// session because the guard has already paid for it.
   private async requireVisible(
     userId: string,
     sessionId: string,
-  ): Promise<SessionWithRelations> {
-    const row = await this.prisma.gameSession.findUnique({
+  ): Promise<{ session: SessionWithRelations; role: MemberRole }> {
+    const session = await this.prisma.gameSession.findUnique({
       where: { id: sessionId },
       include: sessionInclude,
     });
 
-    if (!row) {
+    if (!session) {
       throw notFound('Session not found');
     }
 
-    await requireMembership(this.prisma, userId, row.tableId);
-    return row;
+    const role = await requireMembership(this.prisma, userId, session.tableId);
+    return { session, role };
   }
 }
 
@@ -325,7 +477,19 @@ function toSessionDto(row: SessionWithRelations, viewerId: string): GameSessionD
     status: attendance.status as AttendanceStatus,
     respondedAt: attendance.respondedAt.toISOString(),
     user: toTableUserDto(attendance.user),
+    // A character deleted since the answer was given reads as "not said yet"
+    // rather than as a dangling name.
+    character:
+      attendance.character && attendance.character.deletedAt === null
+        ? {
+            id: attendance.character.id,
+            name: attendance.character.name,
+            occupation: attendance.character.occupation,
+          }
+        : null,
   }));
+
+  const mine = attendances.find((a) => a.userId === viewerId);
 
   return {
     id: row.id,
@@ -338,6 +502,7 @@ function toSessionDto(row: SessionWithRelations, viewerId: string): GameSessionD
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     attendances,
-    myStatus: attendances.find((a) => a.userId === viewerId)?.status ?? null,
+    myStatus: mine?.status ?? null,
+    myCharacter: mine?.character ?? null,
   };
 }

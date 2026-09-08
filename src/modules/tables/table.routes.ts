@@ -10,6 +10,7 @@ import {
   tableIdParamsSchema,
   tableInvitationParamsSchema,
   tableMemberParamsSchema,
+  transferGameMasterSchema,
 } from './table.schemas.js';
 
 export interface TableRoutesOptions {
@@ -69,6 +70,19 @@ const tableRoutes: FastifyPluginAsync<TableRoutesOptions> = async (
       await service.leave(request.user.sub, request.params.id);
       return reply.code(204).send();
     },
+  );
+
+  /// A PUT rather than a POST: a table has one game master, and this sets who
+  /// it is. Sending it twice changes nothing the second time.
+  app.put(
+    '/:id/game-master',
+    { schema: { params: tableIdParamsSchema, body: transferGameMasterSchema } },
+    async (request) =>
+      service.transferGameMaster(
+        request.user.sub,
+        request.params.id,
+        request.body.userId,
+      ),
   );
 
   app.delete(

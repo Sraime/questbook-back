@@ -2,8 +2,10 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { SessionService } from './session.service.js';
 import {
+  attendanceCharacterSchema,
   attendanceSchema,
   patchSessionSchema,
+  sessionAttendeeParamsSchema,
   sessionIdParamsSchema,
 } from './table.schemas.js';
 
@@ -39,7 +41,40 @@ const sessionRoutes: FastifyPluginAsync = async (fastify) => {
     '/:id/attendance',
     { schema: { params: sessionIdParamsSchema, body: attendanceSchema } },
     async (request) =>
-      service.setAttendance(request.user.sub, request.params.id, request.body.status),
+      service.setAttendance(
+        request.user.sub,
+        request.params.id,
+        request.body.status,
+        request.body.characterId,
+      ),
+  );
+
+  /// Split from the answer above so a player can confirm now and decide who
+  /// they are playing later, and so the game master hears about the two
+  /// changes separately.
+  app.put(
+    '/:id/attendance/character',
+    { schema: { params: sessionIdParamsSchema, body: attendanceCharacterSchema } },
+    async (request) =>
+      service.setAttendanceCharacter(
+        request.user.sub,
+        request.params.id,
+        request.body.characterId,
+      ),
+  );
+
+  /// The one way to read someone else's sheet: they registered it for a session
+  /// you are both at. Addressed by player rather than by character id, so the
+  /// authorisation is legible in the URL.
+  app.get(
+    '/:id/attendances/:userId/character',
+    { schema: { params: sessionAttendeeParamsSchema } },
+    async (request) =>
+      service.getAttendanceCharacter(
+        request.user.sub,
+        request.params.id,
+        request.params.userId,
+      ),
   );
 };
 
