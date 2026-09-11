@@ -100,6 +100,23 @@ export function toCharacterDto(row: CharacterWithChildren): CharacterDto {
   };
 }
 
+/// Reads a sheet **without any ownership check**, for callers that have
+/// established their own right to see it by another route. Today the only such
+/// caller is the sessions module, where sharing a session with the character's
+/// owner is what grants the read (see `session.service.ts`). Every other path
+/// must go through `CharacterService`, which scopes by owner.
+export async function readSharedCharacter(
+  prisma: PrismaClient,
+  id: string,
+): Promise<CharacterDto | null> {
+  const row = await prisma.character.findFirst({
+    where: { id, deletedAt: null },
+    include: childrenInclude,
+  });
+
+  return row ? toCharacterDto(row) : null;
+}
+
 export class CharacterService {
   constructor(private readonly prisma: PrismaClient) {}
 

@@ -49,8 +49,20 @@ export const patchSessionSchema = sessionCoreSchema.partial().refine(
   { message: 'At least one field must be provided' },
 );
 
+/// The character is optional here on purpose: a player may confirm first and
+/// say who they are playing later, through [attendanceCharacterSchema].
 export const attendanceSchema = z.object({
   status: attendanceStatusSchema,
+  characterId: idSchema.nullish(),
+});
+
+/// `null` detaches the character without touching the answer.
+export const attendanceCharacterSchema = z.object({
+  characterId: idSchema.nullable(),
+});
+
+export const transferGameMasterSchema = z.object({
+  userId: idSchema,
 });
 
 export const tableIdParamsSchema = z.object({ id: idSchema });
@@ -69,6 +81,11 @@ export const invitationIdParamsSchema = z.object({ id: idSchema });
 
 export const sessionIdParamsSchema = z.object({ id: idSchema });
 
+export const sessionAttendeeParamsSchema = z.object({
+  id: idSchema,
+  userId: idSchema,
+});
+
 /// The raw token from the emailed link. It is base64url, never a UUID, so it
 /// is only bounded rather than shape-checked.
 export const invitationTokenParamsSchema = z.object({
@@ -78,8 +95,10 @@ export const invitationTokenParamsSchema = z.object({
 export type CreateTableInput = z.infer<typeof createTableSchema>;
 export type PatchTableInput = z.infer<typeof patchTableSchema>;
 export type InviteInput = z.infer<typeof inviteSchema>;
+export type TransferGameMasterInput = z.infer<typeof transferGameMasterSchema>;
 export type CreateSessionInput = z.infer<typeof createSessionSchema>;
 export type PatchSessionInput = z.infer<typeof patchSessionSchema>;
 export type AttendanceInput = z.infer<typeof attendanceSchema>;
+export type AttendanceCharacterInput = z.infer<typeof attendanceCharacterSchema>;
 export type MemberRole = z.infer<typeof memberRoleSchema>;
 export type AttendanceStatus = z.infer<typeof attendanceStatusSchema>;

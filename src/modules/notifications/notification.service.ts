@@ -10,7 +10,9 @@ export type NotificationType =
   | 'session_created'
   | 'session_updated'
   | 'session_cancelled'
-  | 'attendance_changed';
+  | 'attendance_changed'
+  | 'attendance_character_changed'
+  | 'game_master_transferred';
 
 export interface NotificationDraft {
   userId: string;
