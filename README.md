@@ -492,7 +492,7 @@ interne et ne sont **jamais** exposés à Internet. UFW n'a donc besoin que de :
 
 ## Tests
 
-62 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
+81 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
 des doublures pour Google, Resend et FCM, et une vraie base PostgreSQL.
 
 ```bash
@@ -515,3 +515,16 @@ attendus via les doublures.
 
 Les suites partagent une base et la vident entre chaque test : elles s'exécutent
 donc en série (`fileParallelism: false`).
+
+### En intégration continue
+
+`.github/workflows/ci.yml` rejoue `npm run typecheck` puis `npm test` sur chaque
+pull request et sur les pushes de `dev`. PostgreSQL y tourne en service du job
+et les migrations versionnées sont appliquées avec `prisma migrate deploy`,
+c'est-à-dire exactement la commande qui s'exécutera en production.
+
+Aucun service tiers n'est sollicité : `RESEND_API_KEY` et les variables Firebase
+restent vides, donc les envois retombent sur leur mode journal.
+
+Ce garde-fou compte double ici, puisqu'un merge dans `main` part directement en
+production, migrations comprises.
