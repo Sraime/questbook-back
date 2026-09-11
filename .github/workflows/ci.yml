@@ -1,0 +1,66 @@
+name: CI
+
+# Un merge dans `main` part directement en production via deploy.sh, migrations
+# comprises. Ce qui est rouge ici ne doit donc jamais atteindre `main`.
+on:
+  pull_request:
+    branches: [main, dev]
+  push:
+    branches: [dev]
+
+jobs:
+  check:
+    name: Typage et tests
+    runs-on: ubuntu-latest
+
+    # La suite parle a une vraie base : elle tronque les tables entre chaque
+    # test plutot que de simuler Prisma.
+    services:
+      db:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: questbook
+          POSTGRES_PASSWORD: questbook
+          POSTGRES_DB: questbook_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U questbook -d questbook_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://questbook:questbook@localhost:5432/questbook_test
+      TEST_DATABASE_URL: postgresql://questbook:questbook@localhost:5432/questbook_test
+      # Valeurs jetables : la CI ne touche a aucun service tiers. Resend et
+      # Firebase restent vides, leurs envois retombent sur le mode journal.
+      JWT_SECRET: integration-tests-signing-key-not-a-secret
+      GOOGLE_CLIENT_IDS: ci.apps.googleusercontent.com
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      # `migrate deploy` plutot que `db push` : on veut verifier que les
+      # migrations versionnees s'appliquent, puisque ce sont elles qui
+      # tourneront en production.
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test

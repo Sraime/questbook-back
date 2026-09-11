@@ -71,6 +71,19 @@ Le gestionnaire d'erreurs central traduit tout en `{ "error": { "code", "message
 > `setErrorHandler` appelé après les `register` ne s'appliquerait jamais aux
 > routes déjà enregistrées (piège déjà rencontré ici, 3 tests rouges à la clé).
 
+### Corps JSON vide
+
+Un parseur `application/json` maison lit un corps vide comme une absence de
+corps, là où celui de Fastify répond `400 FST_ERR_CTP_EMPTY_JSON_BODY`.
+
+Dio, le client HTTP de l'app, estampille **toutes** ses requêtes
+`application/json`, corps ou pas, sans moyen de s'en passer au cas par cas.
+Sans cette tolérance, chaque appel sans corps — annuler une session, quitter
+une table, décliner une invitation — mourait avant d'atteindre son handler.
+
+Rien n'est perdu côté rigueur : les routes qui attendent un corps déclarent un
+schéma, et un corps absent le viole tout aussi bruyamment.
+
 ---
 
 ## Modèle de données
@@ -206,6 +219,11 @@ Les stats et ressources sont adressées par leur **clé métier** (`bibliotheque
 
 Le MJ n'est pas un participant : il anime la séance, ne répond pas et n'est pas
 compté parmi les joueurs attendus. `PUT /sessions/:id/attendance` lui répond 403.
+
+Le champ `nextSessionAt` d'une table ne désigne **que** des séances à venir, et
+vaut `null` s'il n'y en a aucune. Rien ne fait changer de statut une session une
+fois qu'elle a eu lieu : sans ce filtre, la plus ancienne séance `scheduled`
+resterait éternellement en tête et masquerait celle que les joueurs attendent.
 
 Le personnage est facultatif et dissocié de la réponse : un joueur confirme
 d'abord et dit plus tard avec qui il vient. Les deux gestes notifient le MJ
@@ -492,7 +510,7 @@ interne et ne sont **jamais** exposés à Internet. UFW n'a donc besoin que de :
 
 ## Tests
 
-62 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
+87 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
 des doublures pour Google, Resend et FCM, et une vraie base PostgreSQL.
 
 ```bash
@@ -515,3 +533,16 @@ attendus via les doublures.
 
 Les suites partagent une base et la vident entre chaque test : elles s'exécutent
 donc en série (`fileParallelism: false`).
+
+### En intégration continue
+
+`.github/workflows/ci.yml` rejoue `npm run typecheck` puis `npm test` sur chaque
+pull request et sur les pushes de `dev`. PostgreSQL y tourne en service du job
+et les migrations versionnées sont appliquées avec `prisma migrate deploy`,
+c'est-à-dire exactement la commande qui s'exécutera en production.
+
+Aucun service tiers n'est sollicité : `RESEND_API_KEY` et les variables Firebase
+restent vides, donc les envois retombent sur leur mode journal.
+
+Ce garde-fou compte double ici, puisqu'un merge dans `main` part directement en
+production, migrations comprises.
