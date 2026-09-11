@@ -71,6 +71,19 @@ Le gestionnaire d'erreurs central traduit tout en `{ "error": { "code", "message
 > `setErrorHandler` appelé après les `register` ne s'appliquerait jamais aux
 > routes déjà enregistrées (piège déjà rencontré ici, 3 tests rouges à la clé).
 
+### Corps JSON vide
+
+Un parseur `application/json` maison lit un corps vide comme une absence de
+corps, là où celui de Fastify répond `400 FST_ERR_CTP_EMPTY_JSON_BODY`.
+
+Dio, le client HTTP de l'app, estampille **toutes** ses requêtes
+`application/json`, corps ou pas, sans moyen de s'en passer au cas par cas.
+Sans cette tolérance, chaque appel sans corps — annuler une session, quitter
+une table, décliner une invitation — mourait avant d'atteindre son handler.
+
+Rien n'est perdu côté rigueur : les routes qui attendent un corps déclarent un
+schéma, et un corps absent le viole tout aussi bruyamment.
+
 ---
 
 ## Modèle de données
@@ -497,7 +510,7 @@ interne et ne sont **jamais** exposés à Internet. UFW n'a donc besoin que de :
 
 ## Tests
 
-83 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
+87 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
 des doublures pour Google, Resend et FCM, et une vraie base PostgreSQL.
 
 ```bash

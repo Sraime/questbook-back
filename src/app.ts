@@ -61,6 +61,32 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
+  // Dio, the app's HTTP client, labels every request `application/json` even
+  // when it sends no body, and offers no per-request way out. Fastify's stock
+  // parser answers that with a 400, which killed every bodyless call —
+  // cancelling a session, leaving a table, declining an invitation. Reading it
+  // as "no body" costs nothing: routes that need one declare a schema, and an
+  // undefined body fails it just as loudly.
+  app.addContentTypeParser(
+    'application/json',
+    { parseAs: 'string' },
+    (_request, body, done) => {
+      if (body === '') {
+        done(null, undefined);
+        return;
+      }
+
+      try {
+        done(null, JSON.parse(body as string));
+      } catch {
+        const error = new Error('Request body is not valid JSON') as FastifyError;
+        error.statusCode = 400;
+        error.code = 'MALFORMED_JSON';
+        done(error, undefined);
+      }
+    },
+  );
+
   // Must come before the route registrations below: each `register` creates an
   // encapsulated context that captures the error handler in place at that
   // moment, so a handler installed afterwards would never fire for them.
