@@ -207,6 +207,11 @@ Les stats et ressources sont adressées par leur **clé métier** (`bibliotheque
 Le MJ n'est pas un participant : il anime la séance, ne répond pas et n'est pas
 compté parmi les joueurs attendus. `PUT /sessions/:id/attendance` lui répond 403.
 
+Le champ `nextSessionAt` d'une table ne désigne **que** des séances à venir, et
+vaut `null` s'il n'y en a aucune. Rien ne fait changer de statut une session une
+fois qu'elle a eu lieu : sans ce filtre, la plus ancienne séance `scheduled`
+resterait éternellement en tête et masquerait celle que les joueurs attendent.
+
 Le personnage est facultatif et dissocié de la réponse : un joueur confirme
 d'abord et dit plus tard avec qui il vient. Les deux gestes notifient le MJ
 séparément (`attendance_changed`, `attendance_character_changed`), parce qu'ils
@@ -492,7 +497,7 @@ interne et ne sont **jamais** exposés à Internet. UFW n'a donc besoin que de :
 
 ## Tests
 
-81 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
+83 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
 des doublures pour Google, Resend et FCM, et une vraie base PostgreSQL.
 
 ```bash

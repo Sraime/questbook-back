@@ -142,6 +142,35 @@ describe('Sessions', () => {
     expect(table.json().nextSessionAt).toBe('2026-10-12T19:00:00.000Z');
   });
 
+  it('stops calling a session that already happened the next date', async () => {
+    const { gm, tableId } = await tableWithPlayer();
+    await scheduleSession(gm, tableId, { startsAt: '2020-01-01T19:00:00.000Z' });
+
+    const table = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/tables/${tableId}`,
+      headers: gm.authHeader,
+    });
+
+    expect(table.json().nextSessionAt).toBeNull();
+  });
+
+  it('does not let a past session hide the one still ahead', async () => {
+    const { gm, tableId } = await tableWithPlayer();
+    // Ordered oldest first on purpose: a plain `orderBy` without a cutoff would
+    // return this one and the players would never see the real date.
+    await scheduleSession(gm, tableId, { startsAt: '2020-01-01T19:00:00.000Z' });
+    await scheduleSession(gm, tableId);
+
+    const table = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/tables/${tableId}`,
+      headers: gm.authHeader,
+    });
+
+    expect(table.json().nextSessionAt).toBe('2026-10-12T19:00:00.000Z');
+  });
+
   it('notifies members when the date moves', async () => {
     const { gm, player, tableId } = await tableWithPlayer();
     const session = await scheduleSession(gm, tableId);

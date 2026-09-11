@@ -54,24 +54,34 @@ export interface GameTableDto {
   nextSessionAt: string | null;
 }
 
-const tableInclude = {
-  members: {
-    include: { user: true },
-    orderBy: [{ role: 'asc' }, { joinedAt: 'asc' }],
-  },
-  invitations: {
-    where: { status: 'pending' },
-    include: { invitedBy: true },
-    orderBy: { createdAt: 'asc' },
-  },
-  sessions: {
-    where: { status: 'scheduled' },
-    orderBy: { startsAt: 'asc' },
-    take: 1,
-  },
-} satisfies Prisma.GameTableInclude;
+/// A function rather than a constant: the session cutoff below is "now", and a
+/// module-level object would freeze it at import time — a long-running server
+/// would keep answering with the date it booted on.
+function tableInclude() {
+  return {
+    members: {
+      include: { user: true },
+      orderBy: [{ role: 'asc' }, { joinedAt: 'asc' }],
+    },
+    invitations: {
+      where: { status: 'pending' },
+      include: { invitedBy: true },
+      orderBy: { createdAt: 'asc' },
+    },
+    /// Nothing moves a session to another status once it has happened, so
+    /// without the cutoff the earliest `scheduled` row wins forever — and a
+    /// past session ends up hiding the one players are waiting for.
+    sessions: {
+      where: { status: 'scheduled', startsAt: { gt: new Date() } },
+      orderBy: { startsAt: 'asc' },
+      take: 1,
+    },
+  } satisfies Prisma.GameTableInclude;
+}
 
-type TableWithRelations = Prisma.GameTableGetPayload<{ include: typeof tableInclude }>;
+type TableWithRelations = Prisma.GameTableGetPayload<{
+  include: ReturnType<typeof tableInclude>;
+}>;
 
 function displayNameOf(user: TableUserDto): string {
   return user.displayName ?? user.email;
@@ -90,7 +100,7 @@ export class TableService {
   async list(userId: string): Promise<GameTableDto[]> {
     const rows = await this.prisma.gameTable.findMany({
       where: { members: { some: { userId } } },
-      include: tableInclude,
+      include: tableInclude(),
       orderBy: { updatedAt: 'desc' },
     });
 
@@ -102,7 +112,7 @@ export class TableService {
 
     const row = await this.prisma.gameTable.findUnique({
       where: { id: tableId },
-      include: tableInclude,
+      include: tableInclude(),
     });
 
     if (!row) {
@@ -122,7 +132,7 @@ export class TableService {
         ownerId: userId,
         members: { create: { userId, role: 'gm' } },
       },
-      include: tableInclude,
+      include: tableInclude(),
     });
 
     return this.toDto(row, userId);
@@ -143,7 +153,7 @@ export class TableService {
           ? { universeLabel: input.universeLabel ?? null }
           : {}),
       },
-      include: tableInclude,
+      include: tableInclude(),
     });
 
     return this.toDto(row, userId);
@@ -235,7 +245,7 @@ export class TableService {
       const updated = await tx.gameTable.update({
         where: { id: tableId },
         data: { ownerId: memberUserId },
-        include: tableInclude,
+        include: tableInclude(),
       });
 
       await tx.sessionAttendance.deleteMany({
