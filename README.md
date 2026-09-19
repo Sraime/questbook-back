@@ -103,15 +103,20 @@ garde une identité unique sur tous les appareils, sans table de correspondance.
 | `game_tables`         | Table de jeu : titre, univers optionnel, MJ propriétaire          |
 | `table_members`       | Appartenance et rôle (`gm` / `player`)                            |
 | `table_invitations`   | Invitations, jeton stocké **haché** comme les refresh tokens      |
-| `game_sessions`       | Séance : titre, description, date/heure, lieu, statut             |
+| `game_sessions`       | Séance : titre, description, date/heure, lieu, statut, scénario optionnel |
 | `session_attendances` | Réponses des joueurs (`yes` / `no`) et personnage joué, optionnel |
+| `scenarios`           | Catalogue d'aventures, écrites côté serveur (pas par les joueurs) |
+| `scenario_annexes`    | Cartes, indices, documents d'un scénario                          |
+| `scenario_ownerships` | Qui possède un scénario (`grant` aujourd'hui, `purchase` plus tard) |
 | `device_tokens`       | Jetons FCM, un par appareil                                       |
 | `notifications`       | Historique consultable dans l'app                                 |
 
 Les champs des personnages reproduisent exactement les modèles Freezed de l'app
 (`Character`, `CharacterStat`, `CharacterResource`, `InventoryItem`). Les
 tables, elles, n'ont pas d'équivalent local : elles sont partagées entre
-plusieurs comptes et ne vivent que sur le serveur.
+plusieurs comptes et ne vivent que sur le serveur. Les scénarios, volumineux,
+sont listés depuis l'API puis téléchargés sur l'appareil pour la lecture hors
+ligne ; un utilisateur ne voit que ceux qu'il possède.
 
 ---
 
@@ -244,7 +249,7 @@ Les stats et ressources sont adressées par leur **clé métier** (`bibliotheque
 | `GET`    | `/tables/:id/sessions`                         | Sessions de la table                              |
 | `POST`   | `/tables/:id/sessions`                         | Proposer une session (MJ, 201)                    |
 | `GET`    | `/sessions/:id`                                | Détail et réponses de chacun                      |
-| `PATCH`  | `/sessions/:id`                                | Titre, description, date, lieu (MJ)               |
+| `PATCH`  | `/sessions/:id`                                | Titre, description, date, lieu, scénario (MJ) |
 | `DELETE` | `/sessions/:id`                                | Annulation — la session reste visible             |
 | `PUT`    | `/sessions/:id/attendance`                     | `{ "status", "characterId"? }`, modifiable        |
 | `PUT`    | `/sessions/:id/attendance/character`           | Poser, changer ou retirer le personnage           |
@@ -267,6 +272,22 @@ Inscrire un personnage à une session l'ouvre en lecture aux autres membres de l
 table, et à eux seuls. C'est la seule brèche dans l'isolement par compte des
 personnages, et elle passe par la route ci-dessus : `/characters/:id` reste
 strictement privé à son propriétaire.
+
+Une session peut porter un `scenarioId` facultatif. Seul un scénario **possédé**
+par le MJ peut y être accroché ; les autres membres voient le titre, pas le
+document.
+
+### Scénarios
+
+| Méthode | Route              | Description                                              |
+| ------- | ------------------ | -------------------------------------------------------- |
+| `GET`   | `/scenarios`       | Résumés des scénarios possédés (titre, description, jauge) |
+| `GET`   | `/scenarios/:id`   | Document complet + annexes, si possédé ; sinon 404       |
+
+Personne ne crée de scénario par l'API : le catalogue est écrit en base
+(migration / admin). Tant que la boutique n'existe pas, les scénarios marqués
+`grant_on_signup` sont donnés à chaque compte à la connexion. Un id inconnu ou
+non possédé répond **404**, pas 403 : le catalogue n'est pas public.
 
 ### Notifications et appareils
 
