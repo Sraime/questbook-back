@@ -41,12 +41,25 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   const app = Fastify({
     logger: {
       level: env.LOG_LEVEL,
-      // The Google ID token and our own tokens must never reach the log files.
+      // Invitation tokens live in the path; never print the raw URL.
+      serializers: {
+        req(request) {
+          return {
+            method: request.method,
+            url: redactLoggedUrl(request.url),
+            hostname: request.hostname,
+            remoteAddress: request.ip,
+          };
+        },
+      },
+      // The Google ID token, our own tokens and any email in a body must
+      // never reach the log files.
       redact: {
         paths: [
           'req.headers.authorization',
           'req.body.idToken',
           'req.body.refreshToken',
+          'req.body.email',
           // An invitation token grants table membership to whoever holds it.
           'req.params.token',
         ],
@@ -127,11 +140,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     });
   });
 
-  app.setNotFoundHandler((request, reply) =>
+  app.setNotFoundHandler((_request, reply) =>
     reply.code(404).send({
       error: {
         code: 'NOT_FOUND',
-        message: `Route ${request.method} ${request.url} not found`,
+        message: 'Route not found',
       },
     }),
   );
@@ -197,4 +210,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(invitationWebRoutes, { ...tableOptions, prefix: '/invitations' });
 
   return app;
+}
+
+/// Invitation accept links are unguessable tokens in the path. Echoing the
+/// raw URL into logs or 404 bodies would print a credential.
+function redactLoggedUrl(url: string): string {
+  return url.replace(/(\/invitations\/)[^/?#]+/gi, '$1[redacted]');
 }

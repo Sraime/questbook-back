@@ -6,7 +6,15 @@
 
 	log {
 		output stdout
-		format console
+		format filter {
+			wrap console
+			fields {
+				# Invitation tokens sit in the path; they must not land in the
+				# reverse-proxy logs the way a normal URI would.
+				request>uri regexp /invitations/[^/?]+ /invitations/[redacted]
+				request>headers>Authorization delete
+			}
+		}
 	}
 
 	reverse_proxy api:3000 {

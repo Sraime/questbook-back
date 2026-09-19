@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Prisma, PrismaClient } from '@prisma/client';
-import { badRequest, conflict, forbidden, notFound } from '../../lib/errors.js';
+import { badRequest, conflict, forbidden, notFound, tooManyRequests } from '../../lib/errors.js';
 import type { EmailSender } from '../../lib/email-sender.js';
 import type {
   NotificationDraft,
@@ -8,6 +8,7 @@ import type {
 } from '../notifications/notification.service.js';
 import {
   memberUserIds,
+  publicLabel,
   requireGameMaster,
   requireMembership,
   toTableUserDto,
@@ -84,8 +85,16 @@ type TableWithRelations = Prisma.GameTableGetPayload<{
 }>;
 
 function displayNameOf(user: TableUserDto): string {
-  return user.displayName ?? user.email;
+  return user.displayName;
 }
+
+/// Players around the table, not counting the game master. Pending invitations
+/// occupy a seat so a GM cannot flood a table that is already full.
+const MAX_PLAYERS_PER_TABLE = 8;
+
+/// Per GM account, across every table, to stop a stolen session from spamming
+/// arbitrary mailboxes.
+const MAX_INVITES_PER_DAY = 15;
 
 export class TableService {
   constructor(
@@ -286,8 +295,9 @@ export class TableService {
 
   // --- Invitations ---
 
-  /// Only registered players can be invited, which is what lets the emailed
-  /// link bind to a known account and skip a login step.
+  /// A registered player is notified in the app and can accept from the mailed
+  /// link. An unknown mailbox still gets the invitation: they install Questbook,
+  /// sign in with that address, and find it waiting in the Tables tab.
   async invite(
     userId: string,
     tableId: string,
@@ -298,20 +308,27 @@ export class TableService {
     const email = input.email.trim().toLowerCase();
     const invited = await this.prisma.user.findUnique({ where: { email } });
 
-    if (!invited) {
-      throw notFound('No Questbook account uses this email address');
-    }
-
-    if (invited.id === userId) {
+    if (invited?.id === userId) {
       throw badRequest('You are already at this table');
     }
 
-    const alreadyMember = await this.prisma.tableMember.findUnique({
-      where: { tableId_userId: { tableId, userId: invited.id } },
+    if (invited) {
+      const alreadyMember = await this.prisma.tableMember.findUnique({
+        where: { tableId_userId: { tableId, userId: invited.id } },
+      });
+
+      if (alreadyMember) {
+        throw conflict('This player is already at the table');
+      }
+    }
+
+    const existing = await this.prisma.tableInvitation.findUnique({
+      where: { tableId_email: { tableId, email } },
     });
 
-    if (alreadyMember) {
-      throw conflict('This player is already at the table');
+    if (existing?.status !== 'pending') {
+      await this.assertTableHasRoom(tableId);
+      await this.assertInviteQuota(userId);
     }
 
     const token = randomBytes(48).toString('base64url');
@@ -327,29 +344,29 @@ export class TableService {
     const inviter = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
     const inviterName = displayNameOf(toTableUserDto(inviter));
 
-    const draft: NotificationDraft = {
-      userId: invited.id,
-      type: 'table_invitation',
-      title: 'Invitation à une table',
-      body: `${inviterName} t'invite à rejoindre « ${table.title} »`,
-      tableId,
-    };
+    const draft: NotificationDraft | null = invited
+      ? {
+          userId: invited.id,
+          type: 'table_invitation',
+          title: 'Invitation à une table',
+          body: `${inviterName} t'invite à rejoindre « ${table.title} »`,
+          tableId,
+        }
+      : null;
 
-    // A previous invitation to the same player may have been declined or have
-    // expired; re-inviting replaces it rather than piling rows up.
     const invitation = await this.prisma.$transaction(async (tx) => {
       const row = await tx.tableInvitation.upsert({
-        where: { tableId_invitedUserId: { tableId, invitedUserId: invited.id } },
+        where: { tableId_email: { tableId, email } },
         create: {
           tableId,
           email,
-          invitedUserId: invited.id,
+          invitedUserId: invited?.id ?? null,
           invitedById: userId,
           tokenHash: hashToken(token),
           expiresAt,
         },
         update: {
-          email,
+          invitedUserId: invited?.id ?? null,
           invitedById: userId,
           tokenHash: hashToken(token),
           status: 'pending',
@@ -359,11 +376,15 @@ export class TableService {
         include: { invitedBy: true, table: { select: { title: true } } },
       });
 
-      await this.notifications.record(tx, [draft]);
+      if (draft) {
+        await this.notifications.record(tx, [draft]);
+      }
       return row;
     });
 
-    this.notifications.deliver([draft]);
+    if (draft) {
+      this.notifications.deliver([draft]);
+    }
 
     const acceptUrl = `${this.options.publicBaseUrl}/invitations/${token}`;
     try {
@@ -373,6 +394,7 @@ export class TableService {
           tableTitle: table.title,
           inviterName,
           acceptUrl,
+          needsAccount: !invited,
         }),
       );
     } catch (error) {
@@ -432,7 +454,7 @@ export class TableService {
   /// only fail.
   async previewByToken(
     token: string,
-  ): Promise<{ tableTitle: string; inviterName: string }> {
+  ): Promise<{ tableTitle: string; inviterName: string; needsAccount: boolean }> {
     const invitation = await this.prisma.tableInvitation.findUnique({
       where: { tokenHash: hashToken(token) },
       include: { table: { select: { title: true } }, invitedBy: true },
@@ -453,12 +475,13 @@ export class TableService {
     return {
       tableTitle: invitation.table.title,
       inviterName: displayNameOf(toTableUserDto(invitation.invitedBy)),
+      needsAccount: invitation.invitedUserId === null,
     };
   }
 
   /// Reached from the emailed link, where possession of the token is the only
-  /// credential. The invitation carries the account it was issued for, so no
-  /// sign-in is needed to act on it.
+  /// credential. The invitation must already name an account: an unknown
+  /// mailbox has to sign in first, otherwise there is nobody to enrol.
   async acceptByToken(token: string): Promise<{ tableTitle: string }> {
     const invitation = await this.prisma.tableInvitation.findUnique({
       where: { tokenHash: hashToken(token) },
@@ -467,6 +490,12 @@ export class TableService {
 
     if (!invitation) {
       throw notFound('Invitation not found');
+    }
+
+    if (!invitation.invitedUserId) {
+      throw conflict(
+        'Crée un compte Questbook avec cette adresse Google, puis ouvre l’application.',
+      );
     }
 
     await this.settle(invitation.id, invitation.invitedUserId, true);
@@ -494,7 +523,9 @@ export class TableService {
       throw conflict('This invitation has expired');
     }
 
-    const playerName = displayNameOf(toTableUserDto(invitation.invitedUser));
+    const playerName = invitation.invitedUser
+      ? publicLabel(invitation.invitedUser)
+      : 'Joueur';
     const draft: NotificationDraft = {
       userId: invitation.invitedById,
       type: 'invitation_accepted',
@@ -536,6 +567,32 @@ export class TableService {
     return memberUserIds(this.prisma, tableId);
   }
 
+  private async assertTableHasRoom(tableId: string): Promise<void> {
+    const [players, pending] = await Promise.all([
+      this.prisma.tableMember.count({ where: { tableId, role: 'player' } }),
+      this.prisma.tableInvitation.count({
+        where: { tableId, status: 'pending', expiresAt: { gt: new Date() } },
+      }),
+    ]);
+
+    if (players + pending >= MAX_PLAYERS_PER_TABLE) {
+      throw conflict('Cette table a déjà 8 joueurs.');
+    }
+  }
+
+  private async assertInviteQuota(userId: string): Promise<void> {
+    const startOfUtcDay = new Date();
+    startOfUtcDay.setUTCHours(0, 0, 0, 0);
+
+    const sentToday = await this.prisma.tableInvitation.count({
+      where: { invitedById: userId, createdAt: { gte: startOfUtcDay } },
+    });
+
+    if (sentToday >= MAX_INVITES_PER_DAY) {
+      throw tooManyRequests('Tu as déjà envoyé 15 invitations aujourd’hui.');
+    }
+  }
+
   private toDto(row: TableWithRelations, viewerId: string): GameTableDto {
     const viewer = row.members.find((member) => member.userId === viewerId);
 
@@ -551,7 +608,7 @@ export class TableService {
         userId: member.userId,
         role: member.role as MemberRole,
         joinedAt: member.joinedAt.toISOString(),
-        user: toTableUserDto(member.user),
+        user: toTableUserDto(member.user, viewerId),
       })),
       // Only the game master arranges invitations, so players are not shown
       // who else is still hesitating.

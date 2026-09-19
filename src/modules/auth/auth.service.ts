@@ -22,7 +22,7 @@ export interface PublicUser {
 
 /// Signs a short-lived access token. Injected rather than imported so the
 /// service stays free of any Fastify dependency.
-export type AccessTokenSigner = (payload: { sub: string; email: string }) => string;
+export type AccessTokenSigner = (payload: { sub: string }) => string;
 
 export interface AuthServiceOptions {
   prisma: PrismaClient;
@@ -56,18 +56,20 @@ export class AuthService {
       where: { googleSub: identity.sub },
       create: {
         googleSub: identity.sub,
-        email: identity.email,
+        email: identity.email.trim().toLowerCase(),
         displayName: identity.displayName,
         pictureUrl: identity.pictureUrl,
         locale: identity.locale,
       },
       update: {
-        email: identity.email,
+        email: identity.email.trim().toLowerCase(),
         displayName: identity.displayName,
         pictureUrl: identity.pictureUrl,
         locale: identity.locale,
       },
     });
+
+    await this.claimInvitations(user.id, user.email);
 
     const tokens = await this.issueTokens(user);
     return { ...tokens, user: toPublicUser(user) };
@@ -114,6 +116,15 @@ export class AuthService {
     return this.options.prisma.user.findUnique({ where: { id: userId } });
   }
 
+  /// Invitations sent to a mailbox before it had an account become visible
+  /// the moment that address signs in.
+  private async claimInvitations(userId: string, email: string): Promise<void> {
+    await this.options.prisma.tableInvitation.updateMany({
+      where: { email, invitedUserId: null, status: 'pending' },
+      data: { invitedUserId: userId },
+    });
+  }
+
   private async issueTokens(user: User): Promise<AuthTokens> {
     const refreshToken = randomBytes(48).toString('base64url');
     const expiresAt = new Date(
@@ -125,7 +136,7 @@ export class AuthService {
     });
 
     return {
-      accessToken: this.options.signAccessToken({ sub: user.id, email: user.email }),
+      accessToken: this.options.signAccessToken({ sub: user.id }),
       refreshToken,
       expiresIn: this.options.accessTokenTtl,
     };
