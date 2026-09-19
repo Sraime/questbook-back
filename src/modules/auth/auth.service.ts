@@ -56,18 +56,20 @@ export class AuthService {
       where: { googleSub: identity.sub },
       create: {
         googleSub: identity.sub,
-        email: identity.email,
+        email: identity.email.trim().toLowerCase(),
         displayName: identity.displayName,
         pictureUrl: identity.pictureUrl,
         locale: identity.locale,
       },
       update: {
-        email: identity.email,
+        email: identity.email.trim().toLowerCase(),
         displayName: identity.displayName,
         pictureUrl: identity.pictureUrl,
         locale: identity.locale,
       },
     });
+
+    await this.claimInvitations(user.id, user.email);
 
     const tokens = await this.issueTokens(user);
     return { ...tokens, user: toPublicUser(user) };
@@ -112,6 +114,15 @@ export class AuthService {
 
   async findUser(userId: string): Promise<User | null> {
     return this.options.prisma.user.findUnique({ where: { id: userId } });
+  }
+
+  /// Invitations sent to a mailbox before it had an account become visible
+  /// the moment that address signs in.
+  private async claimInvitations(userId: string, email: string): Promise<void> {
+    await this.options.prisma.tableInvitation.updateMany({
+      where: { email, invitedUserId: null, status: 'pending' },
+      data: { invitedUserId: userId },
+    });
   }
 
   private async issueTokens(user: User): Promise<AuthTokens> {

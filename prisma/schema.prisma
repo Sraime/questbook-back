@@ -174,7 +174,9 @@ model TableInvitation {
   id            String    @id @default(uuid())
   tableId       String    @map("table_id")
   email         String
-  invitedUserId String    @map("invited_user_id")
+  /// Null until the address belongs to a Questbook account. The emailed link
+  /// then waits for them to sign in rather than granting membership blindly.
+  invitedUserId String?   @map("invited_user_id")
   invitedById   String    @map("invited_by_id")
   tokenHash     String    @unique @map("token_hash")
   status        String    @default("pending")
@@ -183,10 +185,10 @@ model TableInvitation {
   respondedAt   DateTime? @map("responded_at")
 
   table       GameTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
-  invitedUser User      @relation("InvitationRecipient", fields: [invitedUserId], references: [id], onDelete: Cascade)
+  invitedUser User?     @relation("InvitationRecipient", fields: [invitedUserId], references: [id], onDelete: Cascade)
   invitedBy   User      @relation("InvitationSender", fields: [invitedById], references: [id], onDelete: Cascade)
 
-  @@unique([tableId, invitedUserId])
+  @@unique([tableId, email])
   @@index([invitedUserId, status])
   @@map("table_invitations")
 }

@@ -113,7 +113,7 @@ describe('Tables', () => {
 });
 
 describe('Invitations', () => {
-  it('refuses an email that has no Questbook account', async () => {
+  it('emails an unknown address and waits for them to create an account', async () => {
     const gm = await signIn(context, 'gm');
     const table = await createTable(context, gm);
 
@@ -124,9 +124,20 @@ describe('Invitations', () => {
       payload: { email: 'inconnu@example.com' },
     });
 
-    expect(response.statusCode).toBe(404);
-    expect(response.json().error.code).toBe('NOT_FOUND');
-    expect(context.email.sent).toHaveLength(0);
+    expect(response.statusCode).toBe(201);
+    expect(context.email.lastTo('inconnu@example.com')?.text).toContain(
+      'installe Questbook',
+    );
+
+    const preview = await context.app.inject({
+      method: 'GET',
+      url: `/invitations/${/\/invitations\/([\w-]+)/.exec(
+        context.email.lastTo('inconnu@example.com')?.text ?? '',
+      )?.[1]}`,
+    });
+    expect(preview.statusCode).toBe(200);
+    expect(preview.body).toContain('connecte-toi');
+    expect(preview.body).not.toContain('Accepter l\'invitation');
   });
 
   it('emails a link and notifies the invited player in the app', async () => {
@@ -349,5 +360,80 @@ describe('Invitations', () => {
       url: `/invitations/${token}/accept`,
     });
     expect(accept.statusCode).toBe(200);
+  });
+
+  it('attaches a pending invitation once the mailbox creates an account', async () => {
+    const gm = await signIn(context, 'gm');
+    const table = await createTable(context, gm);
+    await invite(context, gm, table.id, 'nouveau@example.com');
+
+    context.google.register('id-token-nouveau', {
+      sub: 'nouveau',
+      email: 'nouveau@example.com',
+    });
+    const signedIn = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/google',
+      payload: { idToken: 'id-token-nouveau' },
+    });
+    const pending = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/invitations',
+      headers: { authorization: `Bearer ${signedIn.json().accessToken}` },
+    });
+
+    expect(pending.json().invitations).toHaveLength(1);
+    expect(pending.json().invitations[0].email).toBe('nouveau@example.com');
+  });
+
+  it('refuses a ninth player at a table', async () => {
+    const gm = await signIn(context, 'gm');
+    const table = await createTable(context, gm);
+
+    for (let i = 0; i < 8; i += 1) {
+      const response = await context.app.inject({
+        method: 'POST',
+        url: `/api/v1/tables/${table.id}/invitations`,
+        headers: gm.authHeader,
+        payload: { email: `joueur${i}@example.com` },
+      });
+      expect(response.statusCode).toBe(201);
+    }
+
+    const ninth = await context.app.inject({
+      method: 'POST',
+      url: `/api/v1/tables/${table.id}/invitations`,
+      headers: gm.authHeader,
+      payload: { email: 'en-trop@example.com' },
+    });
+
+    expect(ninth.statusCode).toBe(409);
+    expect(ninth.json().error.code).toBe('CONFLICT');
+  });
+
+  it('caps invitations at 15 per game master per day', async () => {
+    const gm = await signIn(context, 'gm');
+
+    for (let i = 0; i < 15; i += 1) {
+      const table = await createTable(context, gm, `Table ${i}`);
+      const response = await context.app.inject({
+        method: 'POST',
+        url: `/api/v1/tables/${table.id}/invitations`,
+        headers: gm.authHeader,
+        payload: { email: `quota${i}@example.com` },
+      });
+      expect(response.statusCode).toBe(201);
+    }
+
+    const extraTable = await createTable(context, gm, 'Table 15');
+    const sixteenth = await context.app.inject({
+      method: 'POST',
+      url: `/api/v1/tables/${extraTable.id}/invitations`,
+      headers: gm.authHeader,
+      payload: { email: 'quota15@example.com' },
+    });
+
+    expect(sixteenth.statusCode).toBe(429);
+    expect(sixteenth.json().error.code).toBe('TOO_MANY_REQUESTS');
   });
 });

@@ -77,6 +77,18 @@ const invitationWebRoutes: FastifyPluginAsync<TableRoutesOptions> = async (
     async (request, reply) => {
       const invitation = await service.previewByToken(request.params.token);
 
+      if (invitation.needsAccount) {
+        return reply.type('text/html; charset=utf-8').send(
+          page(`
+        <h1 style="margin:0 0 12px;font-size:20px">Rejoindre « ${escapeHtml(invitation.tableTitle)} »</h1>
+        <p style="margin:0;line-height:1.5;color:#6b5c48">
+          ${escapeHtml(invitation.inviterName)} t'invite à sa table de jeu.
+          Installe Questbook, connecte-toi avec l'adresse à laquelle ce message
+          a été envoyé, puis ouvre l'onglet Tables : l'invitation t'y attend.
+        </p>`),
+        );
+      }
+
       return reply.type('text/html; charset=utf-8').send(
         page(`
         <h1 style="margin:0 0 12px;font-size:20px">Rejoindre « ${escapeHtml(invitation.tableTitle)} »</h1>
