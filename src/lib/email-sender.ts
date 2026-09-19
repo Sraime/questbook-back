@@ -39,10 +39,9 @@ export function createResendEmailSender(options: {
       });
 
       if (!response.ok) {
-        // The body carries Resend's own error code, which is the only useful
-        // thing to look at when a domain is not verified yet.
-        const body = await response.text();
-        throw new Error(`Resend refused the message (${response.status}): ${body}`);
+        // Resend's error body can echo the recipient address. Status is
+        // enough to diagnose an unverified domain without logging PII.
+        throw new Error(`Resend refused the message (${response.status})`);
       }
     },
   };
@@ -54,7 +53,7 @@ export function createLoggingEmailSender(logger: FastifyBaseLogger): EmailSender
   return {
     async send(message) {
       logger.info(
-        { to: message.to, subject: message.subject, text: message.text },
+        { subject: message.subject },
         'Email not sent: no RESEND_API_KEY configured',
       );
     },
