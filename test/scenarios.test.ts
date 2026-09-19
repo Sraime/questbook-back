@@ -126,8 +126,8 @@ describe('scenarios', () => {
 
     expect(unowned.statusCode).toBe(404);
     expect(unknown.statusCode).toBe(404);
-    expect(unowned.json()).toMatchObject({ code: 'NOT_FOUND' });
-    expect(unowned.json().message).not.toMatch(/own|owner|permission/i);
+    expect(unowned.json().error).toMatchObject({ code: 'NOT_FOUND' });
+    expect(unowned.json().error.message).not.toMatch(/own|owner|permission/i);
   });
 
   it('lets a game master attach an owned scenario to a session', async () => {
