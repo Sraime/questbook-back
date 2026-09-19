@@ -25,9 +25,9 @@ async function insertScenario(options: {
 } = {}) {
   return prisma.scenario.create({
     data: {
-      title: options.title ?? 'Le Phare de Kerloc''h',
+      title: options.title ?? "Le Phare de Kerloc'h",
       description: 'Un gardien disparaît sur la côte.',
-      context: 'Kerloc''h, 1924.',
+      context: "Kerloc'h, 1924.",
       minRecommendedPlayers: 2,
       maxRecommendedPlayers: 5,
       averageDurationMinutes: 180,
