@@ -303,27 +303,30 @@ modifient en même temps.
 
 ```
 MJ ──POST /tables/:id/invitations {email}──▶ API
-                                             │  l'e-mail a-t-il un compte ?
-                                             │  non → 404 "aucun joueur inscrit"
+                                             │  compte existant ?
                                              │  oui → invitation + notification
+                                             │  non → invitation, pas de notif in-app
                                              ├──▶ Resend : lien /invitations/:token
-Joueur ──GET /invitations/:token────────────▶│  page HTML avec un bouton
-Joueur ──POST /invitations/:token/accept────▶│  crée le TableMember
-                                             └──▶ notification au MJ
+Joueur inscrit ──GET/POST /invitations/:token─▶│  page HTML + acceptation
+Joueur inconnu ──GET /invitations/:token─────▶│  page « installe l'app »
+                                             └──▶ à la première connexion, l'invitation
+                                                 apparaît dans l'onglet Tables
 ```
 
-Deux garde-fous expliquent la forme de ce flux :
+Garde-fous :
 
-- **Seuls les comptes existants sont invitables.** L'invitation porte donc
-  toujours l'identifiant du joueur, ce qui permet au lien e-mail de fonctionner
-  sans connexion : posséder le jeton fait autorité, comme pour n'importe quelle
-  invitation par e-mail.
+- **15 invitations par jour et par compte**, tous tables confondues, pour qu'un
+  jeton volé ne spamme pas des boîtes quelconques.
+- **8 joueurs par table** (le MJ n'est pas compté), invitations en attente
+  comprises : une place réservée n'est plus libre.
 - **Le lien n'accepte rien en `GET`.** Les clients mail préchargent les liens ;
-  seul le `POST` du bouton engage le joueur. Le jeton suit exactement le motif
-  des refresh tokens : 48 octets aléatoires envoyés, hachage SHA-256 stocké, et
-  ajouté à la liste `redact` du logger.
+  seul le `POST` du bouton engage un joueur déjà inscrit. Un jeton envoyé à une
+  adresse sans compte n'enrolera personne tant que cette adresse n'a pas créé
+  de compte. Le jeton suit le motif des refresh tokens : 48 octets aléatoires
+  envoyés, hachage SHA-256 stocké, et ajouté à la liste `redact` du logger.
 
-L'invitation reste par ailleurs visible et acceptable directement dans l'app.
+L'invitation reste par ailleurs visible et acceptable directement dans l'app
+dès que le destinataire a un compte.
 
 ### Transmission du rôle de MJ
 
@@ -561,7 +564,9 @@ pour ne pas divulguer l'existence d'un identifiant), **minimisation des emails**
 (un membre ne voit jamais la boîte d'un autre, le JWT ne porte que `sub`), CRUD inventaire, bornage
 des ressources, les quatre scénarios de synchronisation (création, remplacement
 d'agrégat, conflit périmé, propagation des tombstones), et tout le périmètre
-des tables : invitation d'une adresse inconnue refusée, acceptation par le lien
+des tables : invitation d'une adresse inconnue (e-mail d'installation, rattachement
+à la première connexion), plafond de 8 joueurs et de 15 invitations par jour,
+acceptation par le lien
 web et depuis l'app, rejeu impossible, révocation, autorisations MJ/joueur,
 création et modification de sessions, changements de participation, et
 vérification que chaque événement produit bien la notification et l'e-mail

@@ -27,3 +27,6 @@ export const notFound = (message = 'Resource not found'): AppError =>
 
 export const conflict = (message: string, details?: unknown): AppError =>
   new AppError(409, 'CONFLICT', message, details);
+
+export const tooManyRequests = (message: string): AppError =>
+  new AppError(429, 'TOO_MANY_REQUESTS', message);
