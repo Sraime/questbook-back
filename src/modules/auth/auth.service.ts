@@ -22,7 +22,7 @@ export interface PublicUser {
 
 /// Signs a short-lived access token. Injected rather than imported so the
 /// service stays free of any Fastify dependency.
-export type AccessTokenSigner = (payload: { sub: string; email: string }) => string;
+export type AccessTokenSigner = (payload: { sub: string }) => string;
 
 export interface AuthServiceOptions {
   prisma: PrismaClient;
@@ -125,7 +125,7 @@ export class AuthService {
     });
 
     return {
-      accessToken: this.options.signAccessToken({ sub: user.id, email: user.email }),
+      accessToken: this.options.signAccessToken({ sub: user.id }),
       refreshToken,
       expiresIn: this.options.accessTokenTtl,
     };

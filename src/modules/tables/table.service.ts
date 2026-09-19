@@ -84,7 +84,7 @@ type TableWithRelations = Prisma.GameTableGetPayload<{
 }>;
 
 function displayNameOf(user: TableUserDto): string {
-  return user.displayName ?? user.email;
+  return user.displayName;
 }
 
 export class TableService {
@@ -551,7 +551,7 @@ export class TableService {
         userId: member.userId,
         role: member.role as MemberRole,
         joinedAt: member.joinedAt.toISOString(),
-        user: toTableUserDto(member.user),
+        user: toTableUserDto(member.user, viewerId),
       })),
       // Only the game master arranges invitations, so players are not shown
       // who else is still hesitating.

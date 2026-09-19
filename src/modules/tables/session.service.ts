@@ -10,6 +10,7 @@ import type {
 } from '../notifications/notification.service.js';
 import {
   memberUserIds,
+  publicLabel,
   requireGameMaster,
   requireMembership,
   toTableUserDto,
@@ -447,7 +448,7 @@ export class SessionService {
 
   private async playerName(userId: string): Promise<string> {
     const player = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
-    return toTableUserDto(player).displayName ?? player.email;
+    return publicLabel(player);
   }
 
   /// Membership of the parent table is what grants access to a session, so the
@@ -476,7 +477,7 @@ function toSessionDto(row: SessionWithRelations, viewerId: string): GameSessionD
     userId: attendance.userId,
     status: attendance.status as AttendanceStatus,
     respondedAt: attendance.respondedAt.toISOString(),
-    user: toTableUserDto(attendance.user),
+    user: toTableUserDto(attendance.user, viewerId),
     // A character deleted since the answer was given reads as "not said yet"
     // rather than as a dangling name.
     character:

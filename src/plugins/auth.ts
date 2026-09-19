@@ -8,8 +8,8 @@ import type { GoogleVerifier } from '../modules/auth/google-verifier.js';
 
 declare module '@fastify/jwt' {
   interface FastifyJWT {
-    payload: { sub: string; email: string };
-    user: { sub: string; email: string };
+    payload: { sub: string };
+    user: { sub: string };
   }
 }
 

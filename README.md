@@ -142,6 +142,39 @@ App Flutter                    API Questbook                 Google
 - L'inscription et la connexion sont le **même appel** : le premier ID token
   d'un compte Google crée l'utilisateur, les suivants rafraîchissent son profil.
 - Un email non vérifié par Google est refusé.
+- L'**access token** ne porte que `sub` (l'identifiant interne). L'email
+  reste dans `/auth/me` et dans la réponse de connexion, destinés au seul
+  compte connecté.
+
+---
+
+## Données personnelles
+
+Questbook stocke deux identifiants nominatifs par compte : **l'email Google**
+(unique, en clair — il sert à retrouver un joueur pour l'inviter) et le
+**nom affiché** Google. Ce sont des données personnelles ; le reste du modèle
+(personnages, tables, sessions) n'en contient pas, hors copies de l'email sur
+une invitation en cours.
+
+Ce que le code garantit :
+
+- **TLS jusqu'à Caddy.** PostgreSQL et l'API ne publient aucun port ; ils
+  restent sur le réseau Docker interne. UFW n'ouvre que 2222 / 80 / 443.
+- **Minimisation de l'API.** Un membre de table voit son propre email et le
+  nom des autres, jamais leur boîte. Un joueur sans nom Google s'affiche
+  « Joueur », pas `quelquun@…`. Le JWT ne contient plus l'email.
+- **Journaux.** Pino masque jetons, `Authorization` et `req.body.email`. Un
+  404 n'échoe plus l'URL (un lien d'invitation y porterait un jeton). Caddy
+  filtre `/invitations/…` de la même façon. Sans `RESEND_API_KEY`, l'expéditeur
+  de secours journalise le sujet, pas le destinataire ni le corps.
+- **Jetons.** Refresh tokens et jetons d'invitation sont stockés **hachés**
+  (SHA-256). `.env` est créé avec `umask 077` sur le VPS.
+
+Ce qui reste une affaire d'exploitation, pas de code (voir aussi le VPS) :
+
+- chiffrement du disque du VPS et des sauvegardes du volume Postgres ;
+- politique de conservation / suppression de compte (droit à l'effacement) ;
+- politique de confidentialité et DPA Resend, avant une ouverture publique.
 
 ---
 
@@ -511,7 +544,9 @@ interne et ne sont **jamais** exposés à Internet. UFW n'a donc besoin que de :
 ## Tests
 
 87 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
-des doublures pour Google, Resend et FCM, et une vraie base PostgreSQL.
+des doublures pour Google, Resend et FCM, et une vraie base PostgreSQL — plus
+quatre cas dédiés à la minimisation des emails (JWT, membres de table, joueur
+sans nom, 404).
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d
@@ -522,7 +557,8 @@ npm test
 
 Couverture : création de compte et réutilisation, rotation et rejeu du refresh
 token, hachage des jetons, isolation stricte entre comptes (404 plutôt que 403
-pour ne pas divulguer l'existence d'un identifiant), CRUD inventaire, bornage
+pour ne pas divulguer l'existence d'un identifiant), **minimisation des emails**
+(un membre ne voit jamais la boîte d'un autre, le JWT ne porte que `sub`), CRUD inventaire, bornage
 des ressources, les quatre scénarios de synchronisation (création, remplacement
 d'agrégat, conflit périmé, propagation des tombstones), et tout le périmètre
 des tables : invitation d'une adresse inconnue refusée, acceptation par le lien

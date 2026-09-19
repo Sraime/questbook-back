@@ -8,18 +8,30 @@ export type Db = PrismaClient | Prisma.TransactionClient;
 
 export interface TableUserDto {
   id: string;
-  email: string;
-  displayName: string | null;
+  /// Present only when the viewer is this user. Other members see a display
+  /// name, never an email address.
+  email?: string;
+  displayName: string;
   pictureUrl: string | null;
 }
 
-export function toTableUserDto(user: User): TableUserDto {
-  return {
+/// Label shown to other players. Must never fall back to the email: that is
+/// what used to leak a mailbox to everyone at the table.
+export function publicLabel(user: Pick<User, 'displayName'>): string {
+  const name = user.displayName?.trim();
+  return name && name.length > 0 ? name : 'Joueur';
+}
+
+export function toTableUserDto(user: User, viewerId?: string): TableUserDto {
+  const dto: TableUserDto = {
     id: user.id,
-    email: user.email,
-    displayName: user.displayName,
+    displayName: publicLabel(user),
     pictureUrl: user.pictureUrl,
   };
+  if (viewerId === user.id) {
+    dto.email = user.email;
+  }
+  return dto;
 }
 
 /// 404 rather than 403 for a table the caller is not a member of, matching the

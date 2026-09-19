@@ -11,6 +11,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+    # No `ports:` on purpose: the volume holds emails and display names, so
+    # PostgreSQL must stay on the internal Docker network.
     volumes:
       - db-data:/var/lib/postgresql/data
     healthcheck:
