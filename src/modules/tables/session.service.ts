@@ -8,6 +8,7 @@ import type {
   NotificationDraft,
   NotificationService,
 } from '../notifications/notification.service.js';
+import { ScenarioService } from '../scenarios/scenario.service.js';
 import {
   memberUserIds,
   publicLabel,
@@ -51,6 +52,11 @@ export interface GameSessionDto {
   status: string;
   createdAt: string;
   updatedAt: string;
+  scenarioId: string | null;
+  /// Title of the linked scenario, when there is one. Members who do not own
+  /// it still see the name of the evening; the full document stays behind
+  /// ownership.
+  scenario: { id: string; title: string } | null;
   attendances: AttendanceDto[];
   /// The caller's own answer, or null while they have not replied.
   myStatus: AttendanceStatus | null;
@@ -65,6 +71,7 @@ const sessionInclude = {
     include: { user: true, character: true },
     orderBy: { respondedAt: 'asc' },
   },
+  scenario: { select: { id: true, title: true } },
 } satisfies Prisma.GameSessionInclude;
 
 type SessionWithRelations = Prisma.GameSessionGetPayload<{
@@ -89,6 +96,7 @@ export class SessionService {
   constructor(
     private readonly prisma: PrismaClient,
     private readonly notifications: NotificationService,
+    private readonly scenarios = new ScenarioService(prisma),
   ) {}
 
   async list(userId: string, tableId: string): Promise<GameSessionDto[]> {
@@ -114,6 +122,9 @@ export class SessionService {
     input: CreateSessionInput,
   ): Promise<GameSessionDto> {
     await requireGameMaster(this.prisma, userId, tableId);
+    if (input.scenarioId) {
+      await this.scenarios.requireOwned(userId, input.scenarioId);
+    }
 
     const table = await this.prisma.gameTable.findUniqueOrThrow({
       where: { id: tableId },
@@ -133,6 +144,7 @@ export class SessionService {
           description: input.description ?? null,
           startsAt,
           location: input.location,
+          scenarioId: input.scenarioId ?? null,
         },
         include: sessionInclude,
       });
@@ -175,6 +187,9 @@ export class SessionService {
   ): Promise<GameSessionDto> {
     const { session: existing } = await this.requireVisible(userId, sessionId);
     await requireGameMaster(this.prisma, userId, existing.tableId);
+    if (input.scenarioId) {
+      await this.scenarios.requireOwned(userId, input.scenarioId);
+    }
 
     const table = await this.prisma.gameTable.findUniqueOrThrow({
       where: { id: existing.tableId },
@@ -210,6 +225,7 @@ export class SessionService {
             : {}),
           ...(input.startsAt !== undefined ? { startsAt } : {}),
           ...(input.location !== undefined ? { location } : {}),
+          ...(input.scenarioId !== undefined ? { scenarioId: input.scenarioId } : {}),
         },
         include: sessionInclude,
       });
@@ -502,6 +518,8 @@ function toSessionDto(row: SessionWithRelations, viewerId: string): GameSessionD
     status: row.status,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    scenarioId: row.scenarioId,
+    scenario: row.scenario,
     attendances,
     myStatus: mine?.status ?? null,
     myCharacter: mine?.character ?? null,

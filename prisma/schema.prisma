@@ -33,6 +33,7 @@ model User {
   attendances         SessionAttendance[]
   deviceTokens        DeviceToken[]
   notifications       Notification[]
+  scenarioOwnerships  ScenarioOwnership[]
 
   @@map("users")
 }
@@ -201,14 +202,74 @@ model GameSession {
   startsAt    DateTime @map("starts_at")
   location    String
   status      String   @default("scheduled")
+  /// Optional catalogue scenario the evening is based on. Dropping the
+  /// catalogue row must not erase the session, hence SetNull.
+  scenarioId  String?  @map("scenario_id")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   table       GameTable           @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  scenario    Scenario?           @relation(fields: [scenarioId], references: [id], onDelete: SetNull)
   attendances SessionAttendance[]
 
   @@index([tableId, startsAt])
   @@map("game_sessions")
+}
+
+/// Backend-owned adventure. Players never create these: they appear in the
+/// shop later, and until then a few rows are granted on sign-in.
+model Scenario {
+  id                       String   @id @default(uuid())
+  title                    String
+  description              String
+  context                  String   @db.Text
+  minRecommendedPlayers    Int      @map("min_recommended_players")
+  maxRecommendedPlayers    Int      @map("max_recommended_players")
+  averageDurationMinutes   Int      @map("average_duration_minutes")
+  rundownMarkdown          String   @map("rundown_markdown") @db.Text
+  /// Starter catalogue: every account receives ownership on sign-in, so the
+  /// list is not empty before the shop exists.
+  grantOnSignup            Boolean  @default(false) @map("grant_on_signup")
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
+
+  annexes     ScenarioAnnex[]
+  ownerships  ScenarioOwnership[]
+  sessions    GameSession[]
+
+  @@map("scenarios")
+}
+
+model ScenarioAnnex {
+  id               String @id @default(uuid())
+  scenarioId       String @map("scenario_id")
+  sortOrder        Int    @map("sort_order")
+  title            String
+  /// `map`, `clue` or `handout` — stored as text like other enumerations here.
+  kind             String
+  contentMarkdown  String @map("content_markdown") @db.Text
+
+  scenario Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+
+  @@index([scenarioId, sortOrder])
+  @@map("scenario_annexes")
+}
+
+/// Who may see and download a scenario. The shop will insert rows here.
+model ScenarioOwnership {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  scenarioId String   @map("scenario_id")
+  /// `grant` today; `purchase` once the shop lands.
+  source     String   @default("grant")
+  grantedAt  DateTime @default(now()) @map("granted_at")
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scenario Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, scenarioId])
+  @@index([userId])
+  @@map("scenario_ownerships")
 }
 
 /// A missing row means "has not answered yet", which is deliberately distinct

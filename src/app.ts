@@ -21,6 +21,7 @@ import invitationRoutes from './modules/tables/invitation.routes.js';
 import invitationWebRoutes from './modules/tables/invitation-web.routes.js';
 import sessionRoutes from './modules/tables/session.routes.js';
 import tableRoutes from './modules/tables/table.routes.js';
+import scenarioRoutes from './modules/scenarios/scenario.routes.js';
 import type { GoogleVerifier } from './modules/auth/google-verifier.js';
 import type { EmailSender } from './lib/email-sender.js';
 import type { PushSender } from './lib/push-sender.js';
@@ -204,6 +205,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
   await app.register(notificationRoutes, { prefix: '/api/v1/notifications' });
   await app.register(deviceRoutes, { prefix: '/api/v1/devices' });
+  await app.register(scenarioRoutes, { prefix: '/api/v1/scenarios' });
 
   // Outside /api/v1 and unauthenticated: this is the link people click in
   // their mail client, and it renders HTML rather than JSON.

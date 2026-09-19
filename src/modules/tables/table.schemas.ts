@@ -42,12 +42,18 @@ const sessionCoreSchema = z.object({
   location: z.string().min(1).max(200),
 });
 
-export const createSessionSchema = sessionCoreSchema;
+export const createSessionSchema = sessionCoreSchema.extend({
+  scenarioId: idSchema.optional(),
+});
 
-export const patchSessionSchema = sessionCoreSchema.partial().refine(
-  (value) => Object.keys(value).length > 0,
-  { message: 'At least one field must be provided' },
-);
+export const patchSessionSchema = sessionCoreSchema
+  .partial()
+  .extend({
+    scenarioId: idSchema.nullable().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: 'At least one field must be provided',
+  });
 
 /// The character is optional here on purpose: a player may confirm first and
 /// say who they are playing later, through [attendanceCharacterSchema].
