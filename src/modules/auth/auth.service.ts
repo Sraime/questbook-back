@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import type { PrismaClient, User } from '@prisma/client';
 import { unauthorized } from '../../lib/errors.js';
 import type { GoogleVerifier } from './google-verifier.js';
+import { grantStarterScenarios } from '../scenarios/scenario.service.js';
 
 export interface AuthTokens {
   accessToken: string;
@@ -70,6 +71,7 @@ export class AuthService {
     });
 
     await this.claimInvitations(user.id, user.email);
+    await grantStarterScenarios(this.options.prisma, user.id);
 
     const tokens = await this.issueTokens(user);
     return { ...tokens, user: toPublicUser(user) };
