@@ -53,6 +53,11 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
     { preHandler: [app.authenticate], schema: { body: renameBody } },
     async (request) => app.auth.rename(request.user.sub, request.body.displayName),
   );
+
+  app.delete('/me', { preHandler: [app.authenticate] }, async (request, reply) => {
+    await app.auth.deleteAccount(request.user.sub);
+    return reply.code(204).send();
+  });
 };
 
 export default authRoutes;
