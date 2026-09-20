@@ -7,6 +7,11 @@ tables de jeu — membres, invitations par e-mail, sessions et notifications.
 
 **Node.js 22 · Fastify 5 · Prisma 6 · PostgreSQL 17 · TypeScript**
 
+> Ce que désignent **table**, **session**, **scénario**, **asset** ou
+> **boutique** est défini une fois pour toutes dans le
+> [lexique](../questbook-ia/LEXIQUE.md), commun à l'API et à l'app. Ce README
+> décrit comment c'est fait ; le lexique dit ce que c'est.
+
 UI et documentation en **français**, code et commentaires en **anglais**
 (même convention que l'app Flutter).
 
@@ -100,14 +105,16 @@ garde une identité unique sur tous les appareils, sans table de correspondance.
 | `character_stats`     | Caractéristiques, compétences et attributs (`kind`)               |
 | `character_resources` | PV / SAN / PM (`current`, `max`, `tone`)                          |
 | `inventory_items`     | Objets (`name`, `qty`, `weight`)                                  |
-| `game_tables`         | Table de jeu : titre, univers optionnel, MJ propriétaire          |
+| `game_tables`         | Table de jeu : titre, MJ propriétaire (`universe_label` : hérité) |
 | `table_members`       | Appartenance et rôle (`gm` / `player`)                            |
 | `table_invitations`   | Invitations, jeton stocké **haché** comme les refresh tokens      |
 | `game_sessions`       | Séance : titre, description, date/heure, lieu, statut, scénario optionnel |
 | `session_attendances` | Réponses des joueurs (`yes` / `no`) et personnage joué, optionnel |
 | `scenarios`           | Catalogue d'aventures, écrites côté serveur (pas par les joueurs) |
 | `scenario_annexes`    | Cartes, indices, documents d'un scénario                          |
-| `scenario_ownerships` | Qui possède un scénario (`grant` aujourd'hui, `purchase` plus tard) |
+| `scenario_ownerships` | Qui possède un scénario (`grant` à la connexion, `purchase` depuis la boutique) |
+| `shop_items`          | Catalogue de la boutique : titre, type, description, prix, clés d'image et d'asset |
+| `shop_item_ownerships`| Qui a acheté quoi                                                 |
 | `device_tokens`       | Jetons FCM, un par appareil                                       |
 | `notifications`       | Historique consultable dans l'app                                 |
 
@@ -231,7 +238,7 @@ Les stats et ressources sont adressées par leur **clé métier** (`bibliotheque
 | `GET`    | `/tables`                                | Tables dont on est membre                    |
 | `POST`   | `/tables`                                | Création ; le créateur devient MJ (201)      |
 | `GET`    | `/tables/:id`                            | Détail : membres, invitations, prochaine date |
-| `PATCH`  | `/tables/:id`                            | Titre et univers (MJ)                        |
+| `PATCH`  | `/tables/:id`                            | Titre (MJ)                                   |
 | `DELETE` | `/tables/:id`                            | Dissolution (MJ, 204)                        |
 | `DELETE` | `/tables/:id/members/me`                 | Quitter la table (204)                       |
 | `DELETE` | `/tables/:id/members/:userId`            | Exclure un joueur (MJ, 204)                  |
@@ -241,6 +248,12 @@ Les stats et ressources sont adressées par leur **clé métier** (`bibliotheque
 | `GET`    | `/invitations`                           | Invitations reçues, en attente               |
 | `POST`   | `/invitations/:id/accept`                | Accepter depuis l'app                        |
 | `POST`   | `/invitations/:id/decline`               | Décliner (204)                               |
+
+`universeLabel` reste accepté par `POST`/`PATCH /tables` et renvoyé tel quel :
+l'app ne l'envoie ni ne l'affiche plus depuis qu'elle est dédiée à l'Appel de
+Cthulhu, mais les tables créées avant gardent le leur. Aucun traitement ne le
+lit ; la colonne attend qu'on décide un jour de revenir au multi-univers ou de
+la supprimer.
 
 ### Sessions et participation
 
@@ -285,9 +298,41 @@ document.
 | `GET`   | `/scenarios/:id`   | Document complet + annexes, si possédé ; sinon 404       |
 
 Personne ne crée de scénario par l'API : le catalogue est écrit en base
-(migration / admin). Tant que la boutique n'existe pas, les scénarios marqués
-`grant_on_signup` sont donnés à chaque compte à la connexion. Un id inconnu ou
-non possédé répond **404**, pas 403 : le catalogue n'est pas public.
+(migration / admin). Les scénarios marqués `grant_on_signup` sont donnés à
+chaque compte à la connexion, pour que la liste ne soit pas vide ; les autres
+s'achètent à la boutique. Un id inconnu ou non possédé répond **404**, pas
+403 : le catalogue n'est pas public.
+
+### Boutique
+
+| Méthode | Route                      | Description                                        |
+| ------- | -------------------------- | -------------------------------------------------- |
+| `GET`   | `/shop/items`              | Tout le catalogue, chaque article portant `owned`  |
+| `GET`   | `/shop/items/:id`          | Détail d'un article, description comprise          |
+| `POST`  | `/shop/items/:id/purchase` | Accorde l'article et le renvoie possédé            |
+
+Trois partis pris valent d'être connus.
+
+**La liste montre tout, possédé ou non** — l'inverse des scénarios, dont on ne
+voit que ce qu'on détient. Une boutique qui cacherait ce qu'on n'a pas acheté
+n'aurait rien à vendre. C'est `owned` qui fait disparaître le bouton d'achat,
+d'où sa présence dès le résumé.
+
+**L'achat est idempotent**, plutôt que 409 sur un article déjà détenu : un
+double appui ne doit pas faire surgir une erreur, et le jour où de l'argent
+changera de main, c'est exactement la propriété qu'on voudra.
+
+**Le serveur ne décrit pas à quoi ressemble un pion.** Son rendu appartient à
+l'app, comme le montre déjà `board_catalog.dart` ; un article de type `asset`
+n'en porte que la clé. Même chose pour `image_key`, qui nomme une image
+embarquée dans l'app et non une URL : rien ici n'héberge de fichier.
+
+Acheter un article de type `scenario` écrit une ligne dans
+`scenario_ownerships` avec `source: 'purchase'` — la lecture d'une aventure
+reste gardée par cette table, si bien que rien en aval n'a à connaître
+l'existence de la boutique. Le type `pack` n'a pas encore de contenu
+modélisé et son achat est refusé. Un article au prix non nul l'est aussi, tant
+qu'aucun paiement n'existe : sans ce garde-fou, il serait donné.
 
 ### Notifications et appareils
 
@@ -567,7 +612,7 @@ interne et ne sont **jamais** exposés à Internet. UFW n'a donc besoin que de :
 
 ## Tests
 
-87 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
+111 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
 des doublures pour Google, Resend et FCM, et une vraie base PostgreSQL — plus
 quatre cas dédiés à la minimisation des emails (JWT, membres de table, joueur
 sans nom, 404).
@@ -591,7 +636,11 @@ acceptation par le lien
 web et depuis l'app, rejeu impossible, révocation, autorisations MJ/joueur,
 création et modification de sessions, changements de participation, et
 vérification que chaque événement produit bien la notification et l'e-mail
-attendus via les doublures.
+attendus via les doublures. Côté boutique : catalogue visible en entier,
+description réservée au détail, achat qui rend l'article possédé sans
+contaminer les autres comptes, second achat sans erreur ni ligne en double,
+achat d'un scénario qui le fait apparaître dans `/scenarios`, et refus d'un
+article payant comme d'un `pack`.
 
 Les suites partagent une base et la vident entre chaque test : elles s'exécutent
 donc en série (`fileParallelism: false`).
