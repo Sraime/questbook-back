@@ -122,6 +122,20 @@ export class AuthService {
     return this.options.prisma.user.findUnique({ where: { id: userId } });
   }
 
+  /// Erases the account and everything the database hangs off it: characters,
+  /// memberships, answers, notifications, purchases, and the tables the user
+  /// runs — with the sessions and memberships of the players who had joined
+  /// them. Every relation to `User` cascades, so one delete is the whole of it.
+  ///
+  /// This destroys other people's data, which is deliberate: a table without
+  /// its game master is a dead room, and there is no way to hand it over from
+  /// here. The client is the one that must say so before calling.
+  ///
+  /// Idempotent: deleting an account that is already gone is a success.
+  async deleteAccount(userId: string): Promise<void> {
+    await this.options.prisma.user.deleteMany({ where: { id: userId } });
+  }
+
   /// Renames the account. The display name is the only thing a user may change
   /// about their profile: the email and the picture belong to Google.
   async rename(userId: string, displayName: string): Promise<PublicUser> {

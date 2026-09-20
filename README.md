@@ -162,6 +162,24 @@ App Flutter                    API Questbook                 Google
   reste dans `/auth/me` et dans la réponse de connexion, destinés au seul
   compte connecté.
 
+### Supprimer un compte
+
+`DELETE /auth/me` est un `user.delete` sec. Toutes les relations vers `User`
+sont en `onDelete: Cascade`, si bien qu'une seule instruction emporte les
+personnages, les réponses aux sessions, les notifications, les achats et les
+jetons de rafraîchissement.
+
+**Elle emporte aussi les tables que le compte animait**, et avec elles les
+sessions, les invitations et l'appartenance de leurs joueurs. C'est un choix
+assumé plutôt qu'un oubli : `GameTable.ownerId` est en cascade, une table sans
+MJ serait une salle morte, et `transferGameMaster` exige justement un MJ pour
+transmettre — il n'y a donc personne pour le faire à sa place. L'application
+prévient avant d'appeler, en nommant le nombre de tables concernées.
+
+Les autres joueurs, eux, ne sont prévenus de rien : leurs notifications
+appartiennent à la table, qui vient de disparaître. Si cela devient gênant,
+c'est un `SetNull` sur `ownerId` qu'il faudra envisager, pas un correctif ici.
+
 ---
 
 ## Données personnelles
@@ -209,6 +227,7 @@ d'acceptation d'invitation, servie hors préfixe (voir plus bas).
 | `POST`  | `/auth/logout`   | Révoque le refresh token (204)                  |
 | `GET`   | `/auth/me`       | Profil de l'utilisateur connecté                |
 | `PATCH` | `/auth/me`       | Change le pseudo (`displayName`, 1 à 60 signes) |
+| `DELETE`| `/auth/me`       | Efface le compte et tout ce qui en dépend (204) |
 
 ### Personnages
 
