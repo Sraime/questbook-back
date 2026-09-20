@@ -7,6 +7,11 @@ tables de jeu — membres, invitations par e-mail, sessions et notifications.
 
 **Node.js 22 · Fastify 5 · Prisma 6 · PostgreSQL 17 · TypeScript**
 
+> Ce que désignent **table**, **session**, **scénario**, **asset** ou
+> **boutique** est défini une fois pour toutes dans le
+> [lexique](../questbook-ia/LEXIQUE.md), commun à l'API et à l'app. Ce README
+> décrit comment c'est fait ; le lexique dit ce que c'est.
+
 UI et documentation en **français**, code et commentaires en **anglais**
 (même convention que l'app Flutter).
 
