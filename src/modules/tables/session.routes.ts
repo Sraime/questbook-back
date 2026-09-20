@@ -1,12 +1,16 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
+import { NpcService } from './npc.service.js';
 import { SessionService } from './session.service.js';
 import {
   attendanceCharacterSchema,
   attendanceSchema,
+  createNpcSchema,
+  patchNpcSchema,
   patchSessionSchema,
   sessionAttendeeParamsSchema,
   sessionIdParamsSchema,
+  sessionNpcParamsSchema,
 } from './table.schemas.js';
 
 /// Sessions are created under their table (see `table.routes.ts`) but read and
@@ -14,6 +18,7 @@ import {
 const sessionRoutes: FastifyPluginAsync = async (fastify) => {
   const app = fastify.withTypeProvider<ZodTypeProvider>();
   const service = new SessionService(app.prisma, app.notifications);
+  const npcs = new NpcService(app.prisma);
 
   app.addHook('preHandler', app.authenticate);
 
@@ -75,6 +80,47 @@ const sessionRoutes: FastifyPluginAsync = async (fastify) => {
         request.params.id,
         request.params.userId,
       ),
+  );
+
+  // --- Non-player characters ---
+  //
+  // Game-master-only, reads included: what the game master has prepared is
+  // exactly what the players are not supposed to know.
+
+  app.get(
+    '/:id/npcs',
+    { schema: { params: sessionIdParamsSchema } },
+    async (request) => ({ npcs: await npcs.list(request.user.sub, request.params.id) }),
+  );
+
+  app.post(
+    '/:id/npcs',
+    { schema: { params: sessionIdParamsSchema, body: createNpcSchema } },
+    async (request, reply) => {
+      const npc = await npcs.create(request.user.sub, request.params.id, request.body);
+      return reply.code(201).send(npc);
+    },
+  );
+
+  app.patch(
+    '/:id/npcs/:npcId',
+    { schema: { params: sessionNpcParamsSchema, body: patchNpcSchema } },
+    async (request) =>
+      npcs.patch(
+        request.user.sub,
+        request.params.id,
+        request.params.npcId,
+        request.body,
+      ),
+  );
+
+  app.delete(
+    '/:id/npcs/:npcId',
+    { schema: { params: sessionNpcParamsSchema } },
+    async (request, reply) => {
+      await npcs.remove(request.user.sub, request.params.id, request.params.npcId);
+      return reply.code(204).send();
+    },
   );
 };
 

@@ -71,6 +71,26 @@ export const transferGameMasterSchema = z.object({
   userId: idSchema,
 });
 
+/// A non-player character is a name and a free-form note. The description is
+/// generous — it is where the game master writes what the thing wants, what it
+/// knows and what it does if pressed — but not unbounded, like a session's.
+const npcCoreSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  description: z.string().max(5000),
+});
+
+export const createNpcSchema = npcCoreSchema.partial({ description: true });
+
+export const patchNpcSchema = npcCoreSchema.partial().refine(
+  (value) => Object.keys(value).length > 0,
+  { message: 'At least one field must be provided' },
+);
+
+export const sessionNpcParamsSchema = z.object({
+  id: idSchema,
+  npcId: idSchema,
+});
+
 export const tableIdParamsSchema = z.object({ id: idSchema });
 
 export const tableMemberParamsSchema = z.object({
@@ -106,5 +126,7 @@ export type CreateSessionInput = z.infer<typeof createSessionSchema>;
 export type PatchSessionInput = z.infer<typeof patchSessionSchema>;
 export type AttendanceInput = z.infer<typeof attendanceSchema>;
 export type AttendanceCharacterInput = z.infer<typeof attendanceCharacterSchema>;
+export type CreateNpcInput = z.infer<typeof createNpcSchema>;
+export type PatchNpcInput = z.infer<typeof patchNpcSchema>;
 export type MemberRole = z.infer<typeof memberRoleSchema>;
 export type AttendanceStatus = z.infer<typeof attendanceStatusSchema>;
