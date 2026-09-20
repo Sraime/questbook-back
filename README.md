@@ -304,6 +304,34 @@ vaut `null` s'il n'y en a aucune. Rien ne fait changer de statut une session une
 fois qu'elle a eu lieu : sans ce filtre, la plus ancienne séance `scheduled`
 resterait éternellement en tête et masquerait celle que les joueurs attendent.
 
+#### Les deux instants qui bornent une séance
+
+Une séance ne s'éteint pas à l'heure dite : on joue, et la partie déborde
+toujours. Deux instants la bornent donc, calculés dans `session.window.ts` et
+**envoyés dans le DTO** — le client n'a pas à reconstituer la règle, et deux
+implémentations ne peuvent pas diverger.
+
+| Champ | Ce qu'il vaut | Ce qu'il ferme |
+| --- | --- | --- |
+| `closesAt` | Début + 24 h | La séance bascule dans le passé : elle cesse d'être la `nextSessionAt` de sa table, et il n'y a plus rien à y animer. |
+| `answersCloseAt` | Le plus tard entre le début et création + 1 h | Plus personne ne s'inscrit : le MJ a compté ses joueurs. |
+
+Les 24 heures existent pour qu'une session **reste consultable et modifiable
+en pleine partie** : la perdre à 20 h 01 parce qu'elle commençait à 20 h serait
+absurde.
+
+L'heure après la création sert le cas inverse, celui de la partie improvisée :
+proposée à 18 h pour 18 h 30, la séance laisserait sinon trente minutes pour
+répondre, moins le temps de voir passer la notification. Les inscriptions y
+restent ouvertes jusqu'à 19 h. Proposée à 18 h pour 20 h, elles ferment bien à
+20 h — le délai ne raccourcit jamais rien, il ne fait qu'éviter une fenêtre
+trop courte.
+
+Passé `answersCloseAt`, `PUT /sessions/:id/attendance` et
+`PUT /sessions/:id/attendance/character` répondent 409. Le MJ, lui, continue de
+corriger sa séance : déplacer le lieu à mi-partie est précisément ce que les
+24 heures autorisent.
+
 Le personnage est facultatif et dissocié de la réponse : un joueur confirme
 d'abord et dit plus tard avec qui il vient. Les deux gestes notifient le MJ
 séparément (`attendance_changed`, `attendance_character_changed`), parce qu'ils

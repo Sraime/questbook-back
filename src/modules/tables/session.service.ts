@@ -23,6 +23,7 @@ import type {
   MemberRole,
   PatchSessionInput,
 } from './table.schemas.js';
+import { answersCloseAt, sessionClosesAt } from './session.window.js';
 
 /// Just enough of a character to name it in the answers list. The full sheet
 /// lives behind its own endpoint.
@@ -50,6 +51,13 @@ export interface GameSessionDto {
   startsAt: string;
   location: string;
   status: string;
+  /// L'instant où la séance bascule dans le passé, 24h après son début : on
+  /// l'anime et on la corrige jusque-là, la partie durant toujours plus
+  /// longtemps que l'horaire annoncé.
+  closesAt: string;
+  /// L'instant où les inscriptions ferment — le début de la séance, ou une
+  /// heure après sa création si elle a été proposée pour tout de suite.
+  answersCloseAt: string;
   createdAt: string;
   updatedAt: string;
   scenarioId: string | null;
@@ -90,6 +98,14 @@ function formatWhen(date: Date): string {
     minute: '2-digit',
     timeZone: 'Europe/Paris',
   }).format(date);
+}
+
+/// Le message part en français : il est montré tel quel au joueur, comme
+/// celui d'une invitation expirée ou d'une table complète.
+function requireAnswersOpen(session: { startsAt: Date; createdAt: Date }): void {
+  if (Date.now() < answersCloseAt(session).getTime()) return;
+
+  throw conflict('Les inscriptions à cette session sont closes.');
 }
 
 export class SessionService {
@@ -303,6 +319,8 @@ export class SessionService {
       throw conflict('This session is cancelled');
     }
 
+    requireAnswersOpen(existing);
+
     if (characterId) {
       await this.requireOwnCharacter(userId, characterId);
     }
@@ -372,6 +390,8 @@ export class SessionService {
     if (existing.status === 'cancelled') {
       throw conflict('This session is cancelled');
     }
+
+    requireAnswersOpen(existing);
 
     const attendance = existing.attendances.find((row) => row.userId === userId);
     if (!attendance) {
@@ -516,6 +536,8 @@ function toSessionDto(row: SessionWithRelations, viewerId: string): GameSessionD
     startsAt: row.startsAt.toISOString(),
     location: row.location,
     status: row.status,
+    closesAt: sessionClosesAt(row).toISOString(),
+    answersCloseAt: answersCloseAt(row).toISOString(),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     scenarioId: row.scenarioId,
