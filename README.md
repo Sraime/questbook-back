@@ -291,6 +291,10 @@ la supprimer.
 | `PUT`    | `/sessions/:id/attendance`                     | `{ "status", "characterId"? }`, modifiable        |
 | `PUT`    | `/sessions/:id/attendance/character`           | Poser, changer ou retirer le personnage           |
 | `GET`    | `/sessions/:id/attendances/:userId/character`  | Fiche d'un participant, lisible par la table      |
+| `GET`    | `/sessions/:id/npcs`                           | Personnages non-joueurs (MJ seul)                 |
+| `POST`   | `/sessions/:id/npcs`                           | En ajouter un (MJ, 201)                           |
+| `PATCH`  | `/sessions/:id/npcs/:npcId`                    | Nom, description (MJ)                             |
+| `DELETE` | `/sessions/:id/npcs/:npcId`                    | Le retirer (MJ, 204)                              |
 
 Le MJ n'est pas un participant : il anime la séance, ne répond pas et n'est pas
 compté parmi les joueurs attendus. `PUT /sessions/:id/attendance` lui répond 403.
@@ -304,6 +308,22 @@ Le personnage est facultatif et dissocié de la réponse : un joueur confirme
 d'abord et dit plus tard avec qui il vient. Les deux gestes notifient le MJ
 séparément (`attendance_changed`, `attendance_character_changed`), parce qu'ils
 lui apprennent deux choses différentes.
+
+#### Les personnages non-joueurs
+
+Tout ce qui est à la table sans être un joueur : créature, indicateur, esprit.
+Un nom, une description libre, et rien d'autre — ce ne sont pas des fiches de
+personnage, et ils n'ont ni caractéristiques ni propriétaire.
+
+Ils appartiennent à la **session**, pas à la table : ce qu'on prépare pour une
+veillée n'est pas ce qu'on prépare pour la suivante. Une session supprimée les
+emporte, par cascade.
+
+**Toutes ces routes sont réservées au MJ, lectures comprises.** C'est le fond
+de la fonctionnalité : ce que le MJ a écrit est exactement ce que les joueurs
+ne doivent pas savoir. Un joueur de la session reçoit 403, un inconnu 404 comme
+partout ailleurs, et `GET /sessions/:id` ne les mentionne pas — il n'y a donc
+pas de vue joueur à concevoir, ni à oublier de protéger.
 
 Inscrire un personnage à une session l'ouvre en lecture aux autres membres de la
 table, et à eux seuls. C'est la seule brèche dans l'isolement par compte des

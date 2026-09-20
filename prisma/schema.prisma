@@ -212,9 +212,31 @@ model GameSession {
   table       GameTable           @relation(fields: [tableId], references: [id], onDelete: Cascade)
   scenario    Scenario?           @relation(fields: [scenarioId], references: [id], onDelete: SetNull)
   attendances SessionAttendance[]
+  npcs        SessionNpc[]
 
   @@index([tableId, startsAt])
   @@map("game_sessions")
+}
+
+/// Everyone at the table who is not a player: creature, informant, ghost. The
+/// game master writes them down before the evening and reads them during it.
+///
+/// Belongs to the session rather than to the table, and is never exposed to
+/// players: what the game master has prepared is precisely what they are not
+/// supposed to know. There is no owner column for the same reason — the
+/// session already has exactly one game master.
+model SessionNpc {
+  id          String   @id @default(uuid())
+  sessionId   String   @map("session_id")
+  name        String
+  description String   @default("")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  session GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+  @@map("session_npcs")
 }
 
 /// Backend-owned adventure. Players never create these: they appear in the
