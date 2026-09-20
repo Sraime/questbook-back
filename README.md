@@ -100,7 +100,7 @@ garde une identité unique sur tous les appareils, sans table de correspondance.
 | `character_stats`     | Caractéristiques, compétences et attributs (`kind`)               |
 | `character_resources` | PV / SAN / PM (`current`, `max`, `tone`)                          |
 | `inventory_items`     | Objets (`name`, `qty`, `weight`)                                  |
-| `game_tables`         | Table de jeu : titre, univers optionnel, MJ propriétaire          |
+| `game_tables`         | Table de jeu : titre, MJ propriétaire (`universe_label` : hérité) |
 | `table_members`       | Appartenance et rôle (`gm` / `player`)                            |
 | `table_invitations`   | Invitations, jeton stocké **haché** comme les refresh tokens      |
 | `game_sessions`       | Séance : titre, description, date/heure, lieu, statut, scénario optionnel |
@@ -231,7 +231,7 @@ Les stats et ressources sont adressées par leur **clé métier** (`bibliotheque
 | `GET`    | `/tables`                                | Tables dont on est membre                    |
 | `POST`   | `/tables`                                | Création ; le créateur devient MJ (201)      |
 | `GET`    | `/tables/:id`                            | Détail : membres, invitations, prochaine date |
-| `PATCH`  | `/tables/:id`                            | Titre et univers (MJ)                        |
+| `PATCH`  | `/tables/:id`                            | Titre (MJ)                                   |
 | `DELETE` | `/tables/:id`                            | Dissolution (MJ, 204)                        |
 | `DELETE` | `/tables/:id/members/me`                 | Quitter la table (204)                       |
 | `DELETE` | `/tables/:id/members/:userId`            | Exclure un joueur (MJ, 204)                  |
@@ -241,6 +241,12 @@ Les stats et ressources sont adressées par leur **clé métier** (`bibliotheque
 | `GET`    | `/invitations`                           | Invitations reçues, en attente               |
 | `POST`   | `/invitations/:id/accept`                | Accepter depuis l'app                        |
 | `POST`   | `/invitations/:id/decline`               | Décliner (204)                               |
+
+`universeLabel` reste accepté par `POST`/`PATCH /tables` et renvoyé tel quel :
+l'app ne l'envoie ni ne l'affiche plus depuis qu'elle est dédiée à l'Appel de
+Cthulhu, mais les tables créées avant gardent le leur. Aucun traitement ne le
+lit ; la colonne attend qu'on décide un jour de revenir au multi-univers ou de
+la supprimer.
 
 ### Sessions et participation
 
