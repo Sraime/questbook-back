@@ -50,6 +50,11 @@ export class AuthService {
 
   /// Sign-up and sign-in are the same call: the first ID token for a Google
   /// account creates the user, later ones just refresh its profile.
+  ///
+  /// Everything is refreshed from Google except the display name. Google gives
+  /// the first one, and from then on the pseudonym belongs to Questbook: a
+  /// player who renamed themselves here would otherwise be silently renamed
+  /// back at their next sign-in.
   async signInWithGoogle(idToken: string): Promise<AuthResult> {
     const identity = await this.options.google.verify(idToken);
 
@@ -64,7 +69,6 @@ export class AuthService {
       },
       update: {
         email: identity.email.trim().toLowerCase(),
-        displayName: identity.displayName,
         pictureUrl: identity.pictureUrl,
         locale: identity.locale,
       },
@@ -116,6 +120,19 @@ export class AuthService {
 
   async findUser(userId: string): Promise<User | null> {
     return this.options.prisma.user.findUnique({ where: { id: userId } });
+  }
+
+  /// Renames the account. The display name is the only thing a user may change
+  /// about their profile: the email and the picture belong to Google.
+  async rename(userId: string, displayName: string): Promise<PublicUser> {
+    const user = await this.options.prisma.user
+      .update({ where: { id: userId }, data: { displayName } })
+      .catch(() => null);
+
+    if (!user) {
+      throw unauthorized('Account no longer exists');
+    }
+    return toPublicUser(user);
   }
 
   /// Invitations sent to a mailbox before it had an account become visible

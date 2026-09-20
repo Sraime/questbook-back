@@ -40,28 +40,72 @@ describe('Google authentication', () => {
     expect(response.json().error.code).toBe('UNAUTHORIZED');
   });
 
-  it('refreshes the profile when Google reports new details', async () => {
+  it('takes the display name from Google once, and never again', async () => {
     context.google.register('id-token-sub-bob', {
       sub: 'sub-bob',
       displayName: 'Bob',
     });
-    await context.app.inject({
+    const first = await context.app.inject({
       method: 'POST',
       url: '/api/v1/auth/google',
       payload: { idToken: 'id-token-sub-bob' },
     });
+    expect(first.json().user.displayName).toBe('Bob');
 
     context.google.register('id-token-sub-bob', {
       sub: 'sub-bob',
       displayName: 'Bob Renamed',
     });
-    const response = await context.app.inject({
+    const second = await context.app.inject({
       method: 'POST',
       url: '/api/v1/auth/google',
       payload: { idToken: 'id-token-sub-bob' },
     });
 
-    expect(response.json().user.displayName).toBe('Bob Renamed');
+    // Sinon un pseudo choisi dans Questbook serait efface a la connexion
+    // suivante, sans que personne ne comprenne pourquoi.
+    expect(second.json().user.displayName).toBe('Bob');
+  });
+
+  it('renames the account, and the new name survives a sign-in', async () => {
+    const user = await signIn(context, 'sub-carol');
+
+    const renamed = await context.app.inject({
+      method: 'PATCH',
+      url: '/api/v1/auth/me',
+      headers: user.authHeader,
+      payload: { displayName: '  Le Gardien  ' },
+    });
+
+    expect(renamed.statusCode).toBe(200);
+    expect(renamed.json().displayName).toBe('Le Gardien');
+
+    const again = await signIn(context, 'sub-carol');
+    const me = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/me',
+      headers: again.authHeader,
+    });
+    expect(me.json().displayName).toBe('Le Gardien');
+  });
+
+  it('refuses an empty pseudonym and an anonymous rename', async () => {
+    const user = await signIn(context);
+
+    const empty = await context.app.inject({
+      method: 'PATCH',
+      url: '/api/v1/auth/me',
+      headers: user.authHeader,
+      payload: { displayName: '   ' },
+    });
+    expect(empty.statusCode).toBe(400);
+
+    const anonymous = await context.app.inject({
+      method: 'PATCH',
+      url: '/api/v1/auth/me',
+      payload: { displayName: 'Personne' },
+    });
+    expect(anonymous.statusCode).toBe(401);
   });
 
   it('returns the current user on /me and refuses anonymous callers', async () => {

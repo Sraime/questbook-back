@@ -153,6 +153,10 @@ App Flutter                    API Questbook                 Google
   volé n'est utilisable qu'une seule fois, et sa réutilisation est rejetée.
 - L'inscription et la connexion sont le **même appel** : le premier ID token
   d'un compte Google crée l'utilisateur, les suivants rafraîchissent son profil.
+- Tout se rafraîchit depuis Google **sauf le pseudo** : Google donne le
+  premier, ensuite il appartient à Questbook et ne change plus que par
+  `PATCH /auth/me`. Le remettre dans le `update` de l'`upsert` renommerait
+  silencieusement, à sa connexion suivante, quiconque s'est choisi un nom ici.
 - Un email non vérifié par Google est refusé.
 - L'**access token** ne porte que `sub` (l'identifiant interne). L'email
   reste dans `/auth/me` et dans la réponse de connexion, destinés au seul
@@ -204,6 +208,7 @@ d'acceptation d'invitation, servie hors préfixe (voir plus bas).
 | `POST`  | `/auth/refresh`  | Rotation du couple de jetons                    |
 | `POST`  | `/auth/logout`   | Révoque le refresh token (204)                  |
 | `GET`   | `/auth/me`       | Profil de l'utilisateur connecté                |
+| `PATCH` | `/auth/me`       | Change le pseudo (`displayName`, 1 à 60 signes) |
 
 ### Personnages
 
