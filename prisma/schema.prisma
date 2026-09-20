@@ -34,6 +34,7 @@ model User {
   deviceTokens        DeviceToken[]
   notifications       Notification[]
   scenarioOwnerships  ScenarioOwnership[]
+  shopItemOwnerships  ShopItemOwnership[]
 
   @@map("users")
 }
@@ -236,6 +237,7 @@ model Scenario {
   annexes     ScenarioAnnex[]
   ownerships  ScenarioOwnership[]
   sessions    GameSession[]
+  shopItems   ShopItem[]
 
   @@map("scenarios")
 }
@@ -255,7 +257,61 @@ model ScenarioAnnex {
   @@map("scenario_annexes")
 }
 
-/// Who may see and download a scenario. The shop will insert rows here.
+/// An article on sale. Backend-owned like scenarios: players never create
+/// these.
+///
+/// The server does not describe what a token looks like — that stays with the
+/// client, as `board_catalog.dart` already shows — so an asset article carries
+/// only the key the app resolves to a drawing. Same for `imageKey`, which
+/// names a picture bundled with the app rather than a URL: nothing here hosts
+/// files yet.
+model ShopItem {
+  id          String   @id @default(uuid())
+  title       String
+  /// `asset`, `scenario` or `pack` — stored as text like other enumerations
+  /// here. `pack` has no content model yet and cannot be purchased.
+  type        String
+  description String   @db.Text
+  /// In cents, so no rounding ever happens in the app. `0` is the free
+  /// article, and the only price there is until payment exists.
+  priceCents  Int      @default(0) @map("price_cents")
+  imageKey    String   @map("image_key")
+  /// What buying unlocks, one per type. An `asset` article names a token, a
+  /// `scenario` article points at the adventure whose ownership it grants.
+  assetKey    String?  @map("asset_key")
+  scenarioId  String?  @map("scenario_id")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  scenario   Scenario?           @relation(fields: [scenarioId], references: [id], onDelete: SetNull)
+  ownerships ShopItemOwnership[]
+
+  @@index([sortOrder])
+  @@map("shop_items")
+}
+
+/// Who bought what. Mirrors [ScenarioOwnership], which stays the authority on
+/// reading an adventure: buying a `scenario` article writes to both, so
+/// nothing downstream has to learn about the shop.
+model ShopItemOwnership {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  itemId     String   @map("item_id")
+  /// `purchase` today. Kept open for a future gift or bundle.
+  source     String   @default("purchase")
+  acquiredAt DateTime @default(now()) @map("acquired_at")
+
+  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  item ShopItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, itemId])
+  @@index([userId])
+  @@map("shop_item_ownerships")
+}
+
+/// Who may see and download a scenario. The shop inserts rows here when a
+/// `scenario` article is bought, with `source: 'purchase'`.
 model ScenarioOwnership {
   id         String   @id @default(uuid())
   userId     String   @map("user_id")
