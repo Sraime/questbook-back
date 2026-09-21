@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import {
+  characterPayload,
   createTestApp,
   prisma,
   resetDatabase,
@@ -61,13 +62,32 @@ async function scheduleSession(
   return session;
 }
 
-async function answer(as: SignedInUser, sessionId: string, status: string) {
+async function answer(
+  as: SignedInUser,
+  sessionId: string,
+  status: string,
+  characterId?: string,
+) {
   return context.app.inject({
     method: 'PUT',
     url: `/api/v1/sessions/${sessionId}/attendance`,
     headers: as.authHeader,
-    payload: { status },
+    payload: characterId ? { status, characterId } : { status },
   });
+}
+
+/// Venir demande un investigateur : les tests de fenêtre en ont donc besoin,
+/// sans quoi ils buteraient sur cette règle-là au lieu de celle qu'ils visent.
+async function createCharacter(as: SignedInUser) {
+  const response = await context.app.inject({
+    method: 'POST',
+    url: '/api/v1/characters',
+    headers: as.authHeader,
+    payload: characterPayload(),
+  });
+
+  expect(response.statusCode).toBe(201);
+  return response.json();
 }
 
 async function readTable(as: SignedInUser, tableId: string) {
@@ -134,8 +154,11 @@ describe('La fermeture des inscriptions', () => {
   it('accepte une réponse tant que la séance n’a pas commencé', async () => {
     const { gm, player, tableId } = await tableWithPlayer();
     const session = await scheduleSession(gm, tableId, { startsInMs: 48 * hour });
+    const character = await createCharacter(player);
 
-    expect((await answer(player, session.id, 'yes')).statusCode).toBe(200);
+    expect(
+      (await answer(player, session.id, 'yes', character.id)).statusCode,
+    ).toBe(200);
   });
 
   it('refuse une réponse une fois la séance commencée', async () => {
@@ -161,14 +184,20 @@ describe('La fermeture des inscriptions', () => {
         startsInMs: -5 * 60 * 1000,
         createdAgoMs: 10 * 60 * 1000,
       });
+      const character = await createCharacter(player);
 
-      expect((await answer(player, session.id, 'yes')).statusCode).toBe(200);
+      expect(
+        (await answer(player, session.id, 'yes', character.id)).statusCode,
+      ).toBe(200);
     });
 
   it('refuse aussi de changer d’avis', async () => {
     const { gm, player, tableId } = await tableWithPlayer();
     const session = await scheduleSession(gm, tableId, { startsInMs: 48 * hour });
-    expect((await answer(player, session.id, 'yes')).statusCode).toBe(200);
+    const character = await createCharacter(player);
+    expect(
+      (await answer(player, session.id, 'yes', character.id)).statusCode,
+    ).toBe(200);
 
     // La séance a commencé depuis, et la grâce d'une heure est passée.
     await prisma.gameSession.update({
@@ -185,10 +214,15 @@ describe('La fermeture des inscriptions', () => {
     expect(stored.status).toBe('yes');
   });
 
-  it('refuse de nommer un personnage une fois les inscriptions closes', async () => {
+  /// Répondre et dire avec qui ne ferment pas ensemble : le MJ a compté ses
+  /// joueurs, mais un investigateur meurt et un autre le remplace en pleine
+  /// partie.
+  it('laisse changer d’investigateur une fois les inscriptions closes', async () => {
     const { gm, player, tableId } = await tableWithPlayer();
     const session = await scheduleSession(gm, tableId, { startsInMs: 48 * hour });
-    expect((await answer(player, session.id, 'yes')).statusCode).toBe(200);
+    const first = await createCharacter(player);
+    const second = await createCharacter(player);
+    await answer(player, session.id, 'yes', first.id);
 
     await prisma.gameSession.update({
       where: { id: session.id },
@@ -202,7 +236,30 @@ describe('La fermeture des inscriptions', () => {
       method: 'PUT',
       url: `/api/v1/sessions/${session.id}/attendance/character`,
       headers: player.authHeader,
-      payload: { characterId: null },
+      payload: { characterId: second.id },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().attendances[0].character.id).toBe(second.id);
+  });
+
+  it('refuse d’en changer une fois la séance terminée', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId, { startsInMs: 48 * hour });
+    const first = await createCharacter(player);
+    const second = await createCharacter(player);
+    await answer(player, session.id, 'yes', first.id);
+
+    await prisma.gameSession.update({
+      where: { id: session.id },
+      data: { startsAt: new Date(Date.now() - 25 * hour) },
+    });
+
+    const response = await context.app.inject({
+      method: 'PUT',
+      url: `/api/v1/sessions/${session.id}/attendance/character`,
+      headers: player.authHeader,
+      payload: { characterId: second.id },
     });
 
     expect(response.statusCode).toBe(409);
