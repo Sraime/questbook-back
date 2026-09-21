@@ -452,10 +452,10 @@ export class SessionService {
       {
         userId: table.ownerId,
         type: 'attendance_character_changed',
-        title: `Personnage · ${table.title}`,
+        title: `Investigateur · ${table.title}`,
         body: character
           ? `${playerName} jouera ${character.name} pour « ${existing.title} »`
-          : `${playerName} n'a plus de personnage pour « ${existing.title} »`,
+          : `${playerName} n'a plus d'investigateur pour « ${existing.title} »`,
         tableId: existing.tableId,
         sessionId,
       },
