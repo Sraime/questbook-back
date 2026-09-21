@@ -23,6 +23,7 @@ import type {
   MemberRole,
   PatchSessionInput,
 } from './table.schemas.js';
+import { answersCloseAt, sessionClosesAt } from './session.window.js';
 
 /// Just enough of a character to name it in the answers list. The full sheet
 /// lives behind its own endpoint.
@@ -50,6 +51,13 @@ export interface GameSessionDto {
   startsAt: string;
   location: string;
   status: string;
+  /// L'instant où la séance bascule dans le passé, 24h après son début : on
+  /// l'anime et on la corrige jusque-là, la partie durant toujours plus
+  /// longtemps que l'horaire annoncé.
+  closesAt: string;
+  /// L'instant où les inscriptions ferment — le début de la séance, ou une
+  /// heure après sa création si elle a été proposée pour tout de suite.
+  answersCloseAt: string;
   createdAt: string;
   updatedAt: string;
   scenarioId: string | null;
@@ -90,6 +98,27 @@ function formatWhen(date: Date): string {
     minute: '2-digit',
     timeZone: 'Europe/Paris',
   }).format(date);
+}
+
+/// Le message part en français : il est montré tel quel au joueur, comme
+/// celui d'une invitation expirée ou d'une table complète.
+function requireAnswersOpen(session: { startsAt: Date; createdAt: Date }): void {
+  if (Date.now() < answersCloseAt(session).getTime()) return;
+
+  throw conflict('Les inscriptions à cette session sont closes.');
+}
+
+/// Changer d'investigateur reste possible pendant la partie, là où répondre
+/// ne l'est plus.
+///
+/// Ce sont deux gestes différents : le MJ compte ses joueurs à l'heure dite et
+/// ne veut plus d'arrivants, mais qui joue quoi bouge encore une fois la table
+/// assise — un investigateur meurt, un joueur en reprend un autre. Fermer les
+/// deux au même instant enfermait un joueur ayant confirmé sans dire avec qui.
+function requireSessionOpen(session: { startsAt: Date }): void {
+  if (Date.now() < sessionClosesAt(session).getTime()) return;
+
+  throw conflict('Cette session est terminée.');
 }
 
 export class SessionService {
@@ -303,8 +332,23 @@ export class SessionService {
       throw conflict('This session is cancelled');
     }
 
-    if (characterId) {
-      await this.requireOwnCharacter(userId, characterId);
+    requireAnswersOpen(existing);
+
+    const character = characterId
+      ? await this.requireOwnCharacter(userId, characterId)
+      : null;
+
+    // Venir, c'est venir avec quelqu'un. Un « oui » sans investigateur laissait
+    // le MJ avec une chaise et pas de fiche, et le joueur avec une session à
+    // laquelle il ne pouvait pas participer. L'investigateur déjà nommé compte :
+    // changer d'avis sur sa venue ne le redemande pas.
+    const named =
+      character ??
+      existing.attendances.find((row) => row.userId === userId)?.characterId ??
+      null;
+
+    if (status === 'yes' && !named) {
+      throw conflict('Dis avec quel investigateur tu viens.');
     }
 
     const table = await this.prisma.gameTable.findUniqueOrThrow({
@@ -321,7 +365,11 @@ export class SessionService {
         title: `Réponse · ${table.title}`,
         body:
           status === 'yes'
-            ? `${playerName} sera présent pour « ${existing.title} »`
+            ? // Le MJ apprend d'un coup qui vient et avec qui : c'est une seule
+              // décision côté joueur, elle tient dans une seule notification.
+              `${playerName} sera présent${
+                character ? ` avec ${character.name}` : ''
+              } pour « ${existing.title} »`
             : `${playerName} ne sera pas là pour « ${existing.title} »`,
         tableId: existing.tableId,
         sessionId,
@@ -373,9 +421,20 @@ export class SessionService {
       throw conflict('This session is cancelled');
     }
 
+    requireSessionOpen(existing);
+
     const attendance = existing.attendances.find((row) => row.userId === userId);
     if (!attendance) {
       throw conflict('Answer the session before saying who you are playing');
+    }
+
+    // Retirer son investigateur d'une session où l'on vient reviendrait à
+    // confirmer sans personne, ce que [setAttendance] refuse. On ne se
+    // décommande pas par la bande : il y a « Je passe » pour cela.
+    if (!characterId && attendance.status === 'yes') {
+      throw conflict(
+        'Tu viens à cette session : dis avec quel investigateur, ou dis que tu passes.',
+      );
     }
 
     const character = characterId
@@ -393,10 +452,10 @@ export class SessionService {
       {
         userId: table.ownerId,
         type: 'attendance_character_changed',
-        title: `Personnage · ${table.title}`,
+        title: `Investigateur · ${table.title}`,
         body: character
           ? `${playerName} jouera ${character.name} pour « ${existing.title} »`
-          : `${playerName} n'a plus de personnage pour « ${existing.title} »`,
+          : `${playerName} n'a plus d'investigateur pour « ${existing.title} »`,
         tableId: existing.tableId,
         sessionId,
       },
@@ -516,6 +575,8 @@ function toSessionDto(row: SessionWithRelations, viewerId: string): GameSessionD
     startsAt: row.startsAt.toISOString(),
     location: row.location,
     status: row.status,
+    closesAt: sessionClosesAt(row).toISOString(),
+    answersCloseAt: answersCloseAt(row).toISOString(),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     scenarioId: row.scenarioId,

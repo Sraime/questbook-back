@@ -109,9 +109,10 @@ garde une identité unique sur tous les appareils, sans table de correspondance.
 | `table_members`       | Appartenance et rôle (`gm` / `player`)                            |
 | `table_invitations`   | Invitations, jeton stocké **haché** comme les refresh tokens      |
 | `game_sessions`       | Séance : titre, description, date/heure, lieu, statut, scénario optionnel |
-| `session_attendances` | Réponses des joueurs (`yes` / `no`) et personnage joué, optionnel |
-| `scenarios`           | Catalogue d'aventures, écrites côté serveur (pas par les joueurs) |
+| `session_attendances` | Réponses des joueurs (`yes` / `no`) et personnage joué, exigé pour un `yes` |
+| `scenarios`           | Catalogue de scénarios, écrits côté serveur (pas par les joueurs) |
 | `scenario_annexes`    | Cartes, indices, documents d'un scénario                          |
+| `session_boards`      | La carte et les pions d'une session, tels que le MJ les a poussés   |
 | `scenario_ownerships` | Qui possède un scénario (`grant` à la connexion, `purchase` depuis la boutique) |
 | `shop_items`          | Catalogue de la boutique : titre, type, description, prix, clés d'image et d'asset |
 | `shop_item_ownerships`| Qui a acheté quoi                                                 |
@@ -153,10 +154,32 @@ App Flutter                    API Questbook                 Google
   volé n'est utilisable qu'une seule fois, et sa réutilisation est rejetée.
 - L'inscription et la connexion sont le **même appel** : le premier ID token
   d'un compte Google crée l'utilisateur, les suivants rafraîchissent son profil.
+- Tout se rafraîchit depuis Google **sauf le pseudo** : Google donne le
+  premier, ensuite il appartient à Questbook et ne change plus que par
+  `PATCH /auth/me`. Le remettre dans le `update` de l'`upsert` renommerait
+  silencieusement, à sa connexion suivante, quiconque s'est choisi un nom ici.
 - Un email non vérifié par Google est refusé.
 - L'**access token** ne porte que `sub` (l'identifiant interne). L'email
   reste dans `/auth/me` et dans la réponse de connexion, destinés au seul
   compte connecté.
+
+### Supprimer un compte
+
+`DELETE /auth/me` est un `user.delete` sec. Toutes les relations vers `User`
+sont en `onDelete: Cascade`, si bien qu'une seule instruction emporte les
+personnages, les réponses aux sessions, les notifications, les achats et les
+jetons de rafraîchissement.
+
+**Elle emporte aussi les tables que le compte animait**, et avec elles les
+sessions, les invitations et l'appartenance de leurs joueurs. C'est un choix
+assumé plutôt qu'un oubli : `GameTable.ownerId` est en cascade, une table sans
+MJ serait une salle morte, et `transferGameMaster` exige justement un MJ pour
+transmettre — il n'y a donc personne pour le faire à sa place. L'application
+prévient avant d'appeler, en nommant le nombre de tables concernées.
+
+Les autres joueurs, eux, ne sont prévenus de rien : leurs notifications
+appartiennent à la table, qui vient de disparaître. Si cela devient gênant,
+c'est un `SetNull` sur `ownerId` qu'il faudra envisager, pas un correctif ici.
 
 ---
 
@@ -204,6 +227,8 @@ d'acceptation d'invitation, servie hors préfixe (voir plus bas).
 | `POST`  | `/auth/refresh`  | Rotation du couple de jetons                    |
 | `POST`  | `/auth/logout`   | Révoque le refresh token (204)                  |
 | `GET`   | `/auth/me`       | Profil de l'utilisateur connecté                |
+| `PATCH` | `/auth/me`       | Change le pseudo (`displayName`, 1 à 60 signes) |
+| `DELETE`| `/auth/me`       | Efface le compte et tout ce qui en dépend (204) |
 
 ### Personnages
 
@@ -264,9 +289,16 @@ la supprimer.
 | `GET`    | `/sessions/:id`                                | Détail et réponses de chacun                      |
 | `PATCH`  | `/sessions/:id`                                | Titre, description, date, lieu, scénario (MJ) |
 | `DELETE` | `/sessions/:id`                                | Annulation — la session reste visible             |
-| `PUT`    | `/sessions/:id/attendance`                     | `{ "status", "characterId"? }`, modifiable        |
-| `PUT`    | `/sessions/:id/attendance/character`           | Poser, changer ou retirer le personnage           |
+| `PUT`    | `/sessions/:id/attendance`                     | `{ "status", "characterId"? }` — venir exige un personnage |
+| `PUT`    | `/sessions/:id/attendance/character`           | En changer, jusqu'à la fin de la séance           |
 | `GET`    | `/sessions/:id/attendances/:userId/character`  | Fiche d'un participant, lisible par la table      |
+| `GET`    | `/sessions/:id/npcs`                           | Personnages non-joueurs (MJ seul)                 |
+| `POST`   | `/sessions/:id/npcs`                           | En ajouter un (MJ, 201)                           |
+| `PATCH`  | `/sessions/:id/npcs/:npcId`                    | Nom, description (MJ)                             |
+| `DELETE` | `/sessions/:id/npcs/:npcId`                    | Le retirer (MJ, 204)                              |
+| `GET`    | `/sessions/:id/board`                          | Le plateau, lisible par toute la table            |
+| `PUT`    | `/sessions/:id/board`                          | Le remplacer entier (MJ)                          |
+| `GET`    | `/sessions/:id/board/live`                     | WebSocket : le plateau, puis chaque poussée       |
 
 Le MJ n'est pas un participant : il anime la séance, ne répond pas et n'est pas
 compté parmi les joueurs attendus. `PUT /sessions/:id/attendance` lui répond 403.
@@ -276,10 +308,137 @@ vaut `null` s'il n'y en a aucune. Rien ne fait changer de statut une session une
 fois qu'elle a eu lieu : sans ce filtre, la plus ancienne séance `scheduled`
 resterait éternellement en tête et masquerait celle que les joueurs attendent.
 
-Le personnage est facultatif et dissocié de la réponse : un joueur confirme
-d'abord et dit plus tard avec qui il vient. Les deux gestes notifient le MJ
-séparément (`attendance_changed`, `attendance_character_changed`), parce qu'ils
-lui apprennent deux choses différentes.
+#### Le plateau, et pourquoi il est monté ici
+
+Le plateau vivait sur l'appareil seul. Il est remonté le jour où un joueur a dû
+le regarder bouger : une table est partagée, donc ce que tout le monde regarde
+ne peut pas rester privé à une tablette.
+
+**L'appareil du MJ reste la vérité.** Il écrit en local d'abord et pousse quand
+il peut — une soirée dans une cave sans couverture doit continuer de marcher, et
+un plateau qui demanderait le réseau pour déplacer un pion serait inutile
+précisément là où on l'utilise. `session_boards` est donc une **copie que les
+joueurs lisent**, et la dernière poussée gagne sans fusion : un seul compte y
+écrit jamais.
+
+Trois conséquences :
+
+- **Le plateau arrive entier, jamais en différence.** L'appareil détient l'état
+  complet, et envoyer un delta laisserait les deux s'écarter au premier message
+  perdu. `revision` monte de un à chaque poussée, ce qui permet à un écoutant
+  d'écarter un message arrivé en retard.
+- **Les pions restent opaques.** `tokens` est la même chaîne JSON que l'app
+  garde en local ; le serveur vérifie qu'il s'agit d'un tableau et sa taille,
+  rien de plus. Connaître la forme d'un pion est le travail du client, et un
+  serveur qui la validait devrait être mis à jour avant qu'un nouveau type de
+  pion puisse être posé.
+- **C'est l'image inverse des PNJ.** Là, le MJ seul lit ; ici, toute la table
+  lit et le MJ seul écrit. Un plateau est fait pour être vu, une créature
+  préparée est faite pour ne pas l'être.
+
+Un plateau jamais poussé répond **un plateau vide, pas un 404** : la session
+existe, et un joueur peut l'ouvrir avant que le MJ ait posé quoi que ce soit.
+
+##### Le canal temps réel
+
+`GET /sessions/:id/board/live` est une **WebSocket** (`@fastify/websocket`),
+authentifiée par le même en-tête `Authorization` que le reste — la poignée de
+main est une requête HTTP comme une autre. Elle envoie d'abord le plateau
+entier, puis un message `{ "type": "board", "board": … }` à chaque poussée du
+MJ. Sans ce premier message, le client devrait aussi appeler `GET` et verrait un
+plateau vide jusqu'au geste suivant.
+
+Le choix d'une WebSocket plutôt que d'une interrogation périodique tient au
+ressenti : un pion qu'on voit bouger trois secondes après le MJ donne
+l'impression de regarder un enregistrement, et une table qui joue ne supporte
+pas ce décalage.
+
+**Qui écoute quoi est gardé en mémoire** (`BoardLiveRegistry`), et non en base :
+ce n'est pas un fait sur la soirée, c'est la liste des sockets que ce processus
+détient. La perdre à un redémarrage est correct — les sockets meurent avec le
+processus, et chaque client se reconnecte et redemande le plateau.
+
+> **Cela ne marche que parce que l'API tourne en un seul processus.** Le jour
+> où elle tournera en deux derrière Caddy, un MJ servi par l'une pousserait
+> vers des écoutants que l'autre détient, et rien n'arriverait. C'est le moment
+> où il faudra un courtier entre les deux, et la raison pour laquelle cette
+> classe est assez petite pour être remplacée.
+
+Un socket qui refuse un message est retiré plutôt que réessayé : le plateau est
+un état, pas un flux d'événements, donc la poussée suivante porte tout ce que
+la manquée portait.
+
+#### Les deux instants qui bornent une séance
+
+Une séance ne s'éteint pas à l'heure dite : on joue, et la partie déborde
+toujours. Deux instants la bornent donc, calculés dans `session.window.ts` et
+**envoyés dans le DTO** — le client n'a pas à reconstituer la règle, et deux
+implémentations ne peuvent pas diverger.
+
+| Champ | Ce qu'il vaut | Ce qu'il ferme |
+| --- | --- | --- |
+| `closesAt` | Début + 24 h | La séance bascule dans le passé : elle cesse d'être la `nextSessionAt` de sa table, et il n'y a plus rien à y animer. |
+| `answersCloseAt` | Le plus tard entre le début et création + 1 h | Plus personne ne s'inscrit : le MJ a compté ses joueurs. |
+
+Les 24 heures existent pour qu'une session **reste consultable et modifiable
+en pleine partie** : la perdre à 20 h 01 parce qu'elle commençait à 20 h serait
+absurde.
+
+L'heure après la création sert le cas inverse, celui de la partie improvisée :
+proposée à 18 h pour 18 h 30, la séance laisserait sinon trente minutes pour
+répondre, moins le temps de voir passer la notification. Les inscriptions y
+restent ouvertes jusqu'à 19 h. Proposée à 18 h pour 20 h, elles ferment bien à
+20 h — le délai ne raccourcit jamais rien, il ne fait qu'éviter une fenêtre
+trop courte.
+
+Passé `answersCloseAt`, `PUT /sessions/:id/attendance` répond 409. Le MJ, lui,
+continue de corriger sa séance : déplacer le lieu à mi-partie est précisément
+ce que les 24 heures autorisent.
+
+**`PUT /sessions/:id/attendance/character` suit `closesAt`, pas
+`answersCloseAt`** : qui vient et avec qui ne ferment pas au même instant. Le
+MJ a compté ses joueurs et ne veut plus d'arrivants, mais qui joue quoi bouge
+encore une fois la table assise — un investigateur meurt, un autre le
+remplace. Fermer les deux ensemble enfermait par ailleurs un joueur ayant
+confirmé sans dire avec qui.
+
+#### Venir, c'est venir avec quelqu'un
+
+`status: 'yes'` **exige un personnage** : celui que la requête nomme, ou celui
+que l'inscription portait déjà — revenir sur un « non » ne le redemande donc
+pas. Sans l'un ni l'autre, 409 : « Dis avec quel investigateur tu viens. »
+Une chaise sans fiche ne sert ni le MJ, qui ne sait pas qui il a en face, ni
+le joueur, à qui l'app refuserait de participer à la séance.
+
+Le corollaire est que **`characterId: null` est refusé sur une inscription
+`yes`** : on ne se décommande pas par la bande, il y a `status: 'no'` pour
+cela. Se décommander, lui, ne demande personne.
+
+La règle vit sur le serveur et non dans la seule fenêtre du client : une
+fenêtre qu'on referme ne garantit rien, et l'app demande d'ailleurs
+l'investigateur *avant* d'appeler — d'où le `characterId` optionnel de
+`PUT /sessions/:id/attendance`, qui rend la confirmation atomique.
+
+Les deux gestes notifient le MJ séparément (`attendance_changed`,
+`attendance_character_changed`), parce qu'ils lui apprennent deux choses
+différentes ; une confirmation nomme l'investigateur dans son corps, puisque
+les deux informations arrivent ensemble.
+
+#### Les personnages non-joueurs
+
+Tout ce qui est à la table sans être un joueur : créature, indicateur, esprit.
+Un nom, une description libre, et rien d'autre — ce ne sont pas des fiches de
+personnage, et ils n'ont ni caractéristiques ni propriétaire.
+
+Ils appartiennent à la **session**, pas à la table : ce qu'on prépare pour une
+veillée n'est pas ce qu'on prépare pour la suivante. Une session supprimée les
+emporte, par cascade.
+
+**Toutes ces routes sont réservées au MJ, lectures comprises.** C'est le fond
+de la fonctionnalité : ce que le MJ a écrit est exactement ce que les joueurs
+ne doivent pas savoir. Un joueur de la session reçoit 403, un inconnu 404 comme
+partout ailleurs, et `GET /sessions/:id` ne les mentionne pas — il n'y a donc
+pas de vue joueur à concevoir, ni à oublier de protéger.
 
 Inscrire un personnage à une session l'ouvre en lecture aux autres membres de la
 table, et à eux seuls. C'est la seule brèche dans l'isolement par compte des
@@ -308,7 +467,7 @@ s'achètent à la boutique. Un id inconnu ou non possédé répond **404**, pas
 | Méthode | Route                      | Description                                        |
 | ------- | -------------------------- | -------------------------------------------------- |
 | `GET`   | `/shop/items`              | Tout le catalogue, chaque article portant `owned`  |
-| `GET`   | `/shop/items/:id`          | Détail d'un article, description comprise          |
+| `GET`   | `/shop/items/:id`          | Détail d'un article, `scenario_id` compris         |
 | `POST`  | `/shop/items/:id/purchase` | Accorde l'article et le renvoie possédé            |
 
 Trois partis pris valent d'être connus.
@@ -317,6 +476,12 @@ Trois partis pris valent d'être connus.
 voit que ce qu'on détient. Une boutique qui cacherait ce qu'on n'a pas acheté
 n'aurait rien à vendre. C'est `owned` qui fait disparaître le bouton d'achat,
 d'où sa présence dès le résumé.
+
+**La description voyage dès le résumé**, ce qui n'a pas toujours été le cas :
+elle était réservée au détail, jusqu'à ce que l'app affiche les scénarios
+pleine largeur avec quelques lignes de ce dont ils parlent. Un scénario dont
+on ne peut rien lire est un scénario que personne n'ouvre. Le détail garde ce
+qu'il avait en plus, `scenario_id`.
 
 **L'achat est idempotent**, plutôt que 409 sur un article déjà détenu : un
 double appui ne doit pas faire surgir une erreur, et le jour où de l'argent
@@ -328,11 +493,18 @@ n'en porte que la clé. Même chose pour `image_key`, qui nomme une image
 embarquée dans l'app et non une URL : rien ici n'héberge de fichier.
 
 Acheter un article de type `scenario` écrit une ligne dans
-`scenario_ownerships` avec `source: 'purchase'` — la lecture d'une aventure
+`scenario_ownerships` avec `source: 'purchase'` — la lecture d'un scénario
 reste gardée par cette table, si bien que rien en aval n'a à connaître
 l'existence de la boutique. Le type `pack` n'a pas encore de contenu
 modélisé et son achat est refusé. Un article au prix non nul l'est aussi, tant
 qu'aucun paiement n'existe : sans ce garde-fou, il serait donné.
+
+**Deux scénarios sont en rayon**, semés par
+`20260921120000_shop_scenarios` : « Le Dernier Train de Nuit » et
+« L'Herbier de Madame Sauvel ». Leur `grant_on_signup` est faux, à la
+différence du Phare de Kerloc'h — les donner à l'inscription reviendrait à
+n'avoir rien à vendre. Leur prix est nul comme tout le reste du rayon, faute
+de paiement ; c'est ce qui les rend achetables aujourd'hui.
 
 ### Notifications et appareils
 
@@ -484,6 +656,34 @@ flutter run --dart-define=QUESTBOOK_API_URL=http://10.0.2.2:3000
 
 > `10.0.2.2` est l'alias de `localhost` vu depuis l'émulateur Android. Sur un
 > téléphone physique, utiliser l'IP LAN de la machine.
+
+### S'asseoir à une table sans second compte Google
+
+Vérifier ce qu'un joueur voit d'une séance demande deux comptes à la même
+table : un MJ qui pousse le plateau, un joueur qui le regarde. Un émulateur
+n'a qu'un compte Google connecté, et en brancher un second est long, manuel
+et à refaire à chaque poste.
+
+Le rôle ne vient pourtant pas de l'appareil, il vient de la table. Deux
+scripts s'appuient là-dessus :
+
+```bash
+npx tsx scripts/seat-a-player.ts                  # les comptes de la base de dev
+npx tsx scripts/seat-a-player.ts questbook.nextus # asseoir celui-ci comme joueur
+npx tsx scripts/push-as-gm.ts <sessionId> 4       # 4 pions, au nom du MJ
+npx tsx scripts/push-as-gm.ts <sessionId> 4 grille # et la carte voulue
+```
+
+`seat-a-player` crée un MJ de contrôle, une table où le compte donné est
+`player`, et une séance **commencée depuis une heure** — de quoi voir
+« Participer » sans attendre. Les inscriptions restent ouvertes une heure
+après la création de la séance, donc on peut encore répondre. Les
+identifiants de carte se lisent dans `board_catalog.dart` de l'app :
+`manoir`, `grille`.
+
+Les deux signent un jeton avec le `JWT_SECRET` local : un compte de
+contrôle n'a pas de compte Google derrière lui, et rien ne le connecterait
+autrement. C'est aussi pourquoi ils n'ont rien à faire en production.
 
 ---
 

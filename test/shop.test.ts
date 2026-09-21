@@ -99,6 +99,7 @@ describe('shop', () => {
         id: first.id,
         title: 'Le Grand Ancien',
         type: 'asset',
+        description: "Le pion qui porte l'emblème de Questbook.",
         priceCents: 0,
         imageKey: 'logo_mark',
         assetKey: 'grand_ancien',
@@ -108,6 +109,7 @@ describe('shop', () => {
         id: second.id,
         title: 'Pack de départ',
         type: 'pack',
+        description: "Le pion qui porte l'emblème de Questbook.",
         priceCents: 0,
         imageKey: 'logo_mark',
         assetKey: null,
@@ -116,21 +118,43 @@ describe('shop', () => {
     ]);
   });
 
-  it('keeps the description for the detail alone', async () => {
-    const item = await insertItem();
+  it('describes an article in the listing, not only on its page', async () => {
+    // La description était réservée au détail. Un article `scenario` s'affiche
+    // pleine largeur avec quelques lignes de ce dont il parle, et une
+    // aventure dont on ne peut rien lire est une aventure que personne
+    // n'ouvre.
+    const scenario = await insertScenario();
+    const item = await insertItem({
+      title: 'Le Phare de Kerloc’h',
+      type: 'scenario',
+      assetKey: null,
+      scenarioId: scenario.id,
+    });
     const user = await signIn(context);
 
-    const response = await context.app.inject({
+    const list = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/shop/items',
+      headers: user.authHeader,
+    });
+
+    expect(list.json().items[0].description).toBe(
+      "Le pion qui porte l'emblème de Questbook.",
+    );
+
+    // Le détail garde ce qu'il avait en plus : vers quelle aventure pointe
+    // l'article.
+    const detail = await context.app.inject({
       method: 'GET',
       url: `/api/v1/shop/items/${item.id}`,
       headers: user.authHeader,
     });
 
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json()).toMatchObject({
       id: item.id,
       description: "Le pion qui porte l'emblème de Questbook.",
-      scenarioId: null,
+      scenarioId: scenario.id,
       owned: false,
     });
   });

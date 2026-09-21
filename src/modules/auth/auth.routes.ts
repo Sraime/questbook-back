@@ -6,6 +6,12 @@ import { toPublicUser } from './auth.service.js';
 
 const refreshTokenBody = z.object({ refreshToken: z.string().min(1) });
 
+/// A pseudonym is read in lists next to other players', so it is bounded well
+/// below the 120 characters a table title may take.
+const renameBody = z.object({
+  displayName: z.string().trim().min(1).max(60),
+});
+
 const authRoutes: FastifyPluginAsync = async (fastify) => {
   const app = fastify.withTypeProvider<ZodTypeProvider>();
 
@@ -40,6 +46,17 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
       throw unauthorized('Account no longer exists');
     }
     return toPublicUser(user);
+  });
+
+  app.patch(
+    '/me',
+    { preHandler: [app.authenticate], schema: { body: renameBody } },
+    async (request) => app.auth.rename(request.user.sub, request.body.displayName),
+  );
+
+  app.delete('/me', { preHandler: [app.authenticate] }, async (request, reply) => {
+    await app.auth.deleteAccount(request.user.sub);
+    return reply.code(204).send();
   });
 };
 

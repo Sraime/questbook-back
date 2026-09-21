@@ -11,6 +11,7 @@ import type { PrismaClient } from '@prisma/client';
 import type { Env } from './config/env.js';
 import { AppError } from './lib/errors.js';
 import authPlugin from './plugins/auth.js';
+import boardLivePlugin from './plugins/board-live.js';
 import messagingPlugin from './plugins/messaging.js';
 import prismaPlugin from './plugins/prisma.js';
 import authRoutes from './modules/auth/auth.routes.js';
@@ -175,6 +176,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     googleClientIds: env.GOOGLE_CLIENT_IDS,
     googleVerifier: options.googleVerifier,
   });
+
+  // Avant les routes : c'est lui qui apprend a Fastify a repondre a une
+  // demande de bascule, et une route `websocket: true` declaree sans lui
+  // echoue au demarrage.
+  await app.register(boardLivePlugin);
 
   await app.register(messagingPlugin, {
     resendApiKey: env.RESEND_API_KEY,

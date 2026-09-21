@@ -8,6 +8,11 @@ export interface ShopItemSummaryDto {
   id: string;
   title: string;
   type: string;
+  /// Carried in the listing, not held back for the detail: a `scenario`
+  /// article is shown full width with a few lines of what it is about, and
+  /// an adventure one cannot read anything about is an adventure nobody
+  /// opens. Asset rows ignore it.
+  description: string;
   priceCents: number;
   imageKey: string;
   /// Present on `asset` articles. Carried in the summary on purpose: the app
@@ -18,7 +23,6 @@ export interface ShopItemSummaryDto {
 }
 
 export interface ShopItemDetailDto extends ShopItemSummaryDto {
-  description: string;
   scenarioId: string | null;
 }
 
@@ -26,6 +30,7 @@ const summarySelect = {
   id: true,
   title: true,
   type: true,
+  description: true,
   priceCents: true,
   imageKey: true,
   assetKey: true,
@@ -33,7 +38,6 @@ const summarySelect = {
 
 const detailSelect = {
   ...summarySelect,
-  description: true,
   scenarioId: true,
 } as const;
 

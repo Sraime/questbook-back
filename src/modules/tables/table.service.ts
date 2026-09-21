@@ -15,6 +15,7 @@ import {
   type TableUserDto,
 } from './table.access.js';
 import { renderInvitationEmail } from './invitation-email.js';
+import { sessionGraceMs } from './session.window.js';
 import type {
   CreateTableInput,
   InviteInput,
@@ -72,8 +73,15 @@ function tableInclude() {
     /// Nothing moves a session to another status once it has happened, so
     /// without the cutoff the earliest `scheduled` row wins forever — and a
     /// past session ends up hiding the one players are waiting for.
+    ///
+    /// Le seuil recule de la durée de grâce : une séance commencée est encore
+    /// celle qui occupe la table, et l'annoncer passée en pleine partie serait
+    /// mentir à tout le monde.
     sessions: {
-      where: { status: 'scheduled', startsAt: { gt: new Date() } },
+      where: {
+        status: 'scheduled',
+        startsAt: { gt: new Date(Date.now() - sessionGraceMs) },
+      },
       orderBy: { startsAt: 'asc' },
       take: 1,
     },

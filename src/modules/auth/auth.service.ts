@@ -50,6 +50,11 @@ export class AuthService {
 
   /// Sign-up and sign-in are the same call: the first ID token for a Google
   /// account creates the user, later ones just refresh its profile.
+  ///
+  /// Everything is refreshed from Google except the display name. Google gives
+  /// the first one, and from then on the pseudonym belongs to Questbook: a
+  /// player who renamed themselves here would otherwise be silently renamed
+  /// back at their next sign-in.
   async signInWithGoogle(idToken: string): Promise<AuthResult> {
     const identity = await this.options.google.verify(idToken);
 
@@ -64,7 +69,6 @@ export class AuthService {
       },
       update: {
         email: identity.email.trim().toLowerCase(),
-        displayName: identity.displayName,
         pictureUrl: identity.pictureUrl,
         locale: identity.locale,
       },
@@ -116,6 +120,33 @@ export class AuthService {
 
   async findUser(userId: string): Promise<User | null> {
     return this.options.prisma.user.findUnique({ where: { id: userId } });
+  }
+
+  /// Erases the account and everything the database hangs off it: characters,
+  /// memberships, answers, notifications, purchases, and the tables the user
+  /// runs — with the sessions and memberships of the players who had joined
+  /// them. Every relation to `User` cascades, so one delete is the whole of it.
+  ///
+  /// This destroys other people's data, which is deliberate: a table without
+  /// its game master is a dead room, and there is no way to hand it over from
+  /// here. The client is the one that must say so before calling.
+  ///
+  /// Idempotent: deleting an account that is already gone is a success.
+  async deleteAccount(userId: string): Promise<void> {
+    await this.options.prisma.user.deleteMany({ where: { id: userId } });
+  }
+
+  /// Renames the account. The display name is the only thing a user may change
+  /// about their profile: the email and the picture belong to Google.
+  async rename(userId: string, displayName: string): Promise<PublicUser> {
+    const user = await this.options.prisma.user
+      .update({ where: { id: userId }, data: { displayName } })
+      .catch(() => null);
+
+    if (!user) {
+      throw unauthorized('Account no longer exists');
+    }
+    return toPublicUser(user);
   }
 
   /// Invitations sent to a mailbox before it had an account become visible

@@ -94,13 +94,19 @@ async function setCharacter(
   });
 }
 
-async function notificationTypes(user: SignedInUser): Promise<string[]> {
+async function notifications(
+  user: SignedInUser,
+): Promise<{ type: string; body: string }[]> {
   const response = await context.app.inject({
     method: 'GET',
     url: '/api/v1/notifications',
     headers: user.authHeader,
   });
-  return response.json().notifications.map((n: { type: string }) => n.type);
+  return response.json().notifications;
+}
+
+async function notificationTypes(user: SignedInUser): Promise<string[]> {
+  return (await notifications(user)).map((row) => row.type);
 }
 
 describe('Sessions', () => {
@@ -266,12 +272,11 @@ describe('Participation', () => {
   it('notifies the game master when a player confirms', async () => {
     const { gm, player, tableId } = await tableWithPlayer();
     const session = await scheduleSession(gm, tableId);
+    const character = await createCharacter(player);
 
-    const response = await context.app.inject({
-      method: 'PUT',
-      url: `/api/v1/sessions/${session.id}/attendance`,
-      headers: player.authHeader,
-      payload: { status: 'yes' },
+    const response = await answer(player, session.id, {
+      status: 'yes',
+      characterId: character.id,
     });
 
     expect(response.statusCode).toBe(200);
@@ -279,18 +284,26 @@ describe('Participation', () => {
     expect(await notificationTypes(gm)).toContain('attendance_changed');
   });
 
+  /// Qui vient et avec qui sont une seule décision côté joueur : le MJ les
+  /// apprend d'une seule notification, pas de deux.
+  it('names the investigator in the notification of a confirmation', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+    const character = await createCharacter(player, { name: 'Ernest Blackwood' });
+
+    await answer(player, session.id, { status: 'yes', characterId: character.id });
+
+    const bodies = (await notifications(gm)).map((row) => row.body);
+    expect(bodies.some((body) => body.includes('avec Ernest Blackwood'))).toBe(true);
+  });
+
   it('notifies the game master again when a player changes their mind', async () => {
     const { gm, player, tableId } = await tableWithPlayer();
     const session = await scheduleSession(gm, tableId);
+    const character = await createCharacter(player);
 
-    for (const status of ['yes', 'no'] as const) {
-      await context.app.inject({
-        method: 'PUT',
-        url: `/api/v1/sessions/${session.id}/attendance`,
-        headers: player.authHeader,
-        payload: { status },
-      });
-    }
+    await answer(player, session.id, { status: 'yes', characterId: character.id });
+    await answer(player, session.id, { status: 'no' });
 
     const changes = (await notificationTypes(gm)).filter(
       (type) => type === 'attendance_changed',
@@ -304,13 +317,9 @@ describe('Participation', () => {
   it('shows every answer to the whole table', async () => {
     const { gm, player, tableId } = await tableWithPlayer();
     const session = await scheduleSession(gm, tableId);
+    const character = await createCharacter(player);
 
-    await context.app.inject({
-      method: 'PUT',
-      url: `/api/v1/sessions/${session.id}/attendance`,
-      headers: player.authHeader,
-      payload: { status: 'yes' },
-    });
+    await answer(player, session.id, { status: 'yes', characterId: character.id });
 
     const asGm = await context.app.inject({
       method: 'GET',
@@ -338,6 +347,44 @@ describe('Participation', () => {
     expect(await prisma.sessionAttendance.count()).toBe(0);
   });
 
+  /// Une chaise sans fiche ne sert personne : le MJ ne sait pas qui il a en
+  /// face, et le joueur ne peut pas participer à la séance.
+  it('refuses a confirmation that names nobody', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+
+    const response = await answer(player, session.id, { status: 'yes' });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.message).toContain('investigateur');
+    expect(await prisma.sessionAttendance.count()).toBe(0);
+  });
+
+  /// Se décommander ne demande personne : c'est confirmer qui engage.
+  it('accepts a refusal that names nobody', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+
+    const response = await answer(player, session.id, { status: 'no' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().myStatus).toBe('no');
+  });
+
+  /// Revenir sur un « non » ne redemande pas l'investigateur déjà nommé.
+  it('accepts coming back with the investigator already named', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+    const character = await createCharacter(player);
+
+    await answer(player, session.id, { status: 'yes', characterId: character.id });
+    await answer(player, session.id, { status: 'no' });
+    const again = await answer(player, session.id, { status: 'yes' });
+
+    expect(again.statusCode).toBe(200);
+    expect(again.json().attendances[0].character.id).toBe(character.id);
+  });
+
   it('accepts an answer that already names a character', async () => {
     const { gm, player, tableId } = await tableWithPlayer();
     const session = await scheduleSession(gm, tableId);
@@ -355,19 +402,39 @@ describe('Participation', () => {
     });
   });
 
-  it('accepts an answer with no character, then names one later', async () => {
+  it('lets a player swap investigators without touching their answer', async () => {
     const { gm, player, tableId } = await tableWithPlayer();
     const session = await scheduleSession(gm, tableId);
-    const character = await createCharacter(player);
+    const first = await createCharacter(player, { name: 'Ernest Blackwood' });
+    const second = await createCharacter(player, { name: 'Alice Winthrop' });
 
-    const confirmed = await answer(player, session.id, { status: 'yes' });
-    expect(confirmed.json().attendances[0].character).toBeNull();
+    await answer(player, session.id, { status: 'yes', characterId: first.id });
+    const swapped = await setCharacter(player, session.id, second.id);
 
-    const named = await setCharacter(player, session.id, character.id);
-
-    expect(named.statusCode).toBe(200);
-    expect(named.json().attendances[0].character.id).toBe(character.id);
+    expect(swapped.statusCode).toBe(200);
+    expect(swapped.json().myStatus).toBe('yes');
+    expect(swapped.json().attendances[0].character.id).toBe(second.id);
     expect(await notificationTypes(gm)).toContain('attendance_character_changed');
+  });
+
+  /// Le mot qu'un joueur lit est « investigateur », jamais « personnage » :
+  /// une notification est du texte produit, soumis au même vocabulaire que
+  /// l'app.
+  it('names the investigator as such to the game master', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+    const character = await createCharacter(player, { name: 'Ernest Blackwood' });
+
+    await answer(player, session.id, { status: 'yes', characterId: character.id });
+    await answer(player, session.id, { status: 'no' });
+    await setCharacter(player, session.id, null);
+
+    const notice = (await notifications(gm)).find(
+      (row) => row.type === 'attendance_character_changed',
+    );
+
+    expect(notice?.title).toContain('Investigateur');
+    expect(notice?.body).toContain("n'a plus d'investigateur");
   });
 
   it('keeps the character when the answer is sent again without one', async () => {
@@ -381,12 +448,28 @@ describe('Participation', () => {
     expect(again.json().attendances[0].character.id).toBe(character.id);
   });
 
-  it('detaches the character when asked explicitly', async () => {
+  /// On ne se décommande pas par la bande : retirer son investigateur d'une
+  /// séance où l'on vient laisserait une chaise sans fiche, que la
+  /// confirmation refuse déjà.
+  it('refuses to detach the investigator of a player who is coming', async () => {
     const { gm, player, tableId } = await tableWithPlayer();
     const session = await scheduleSession(gm, tableId);
     const character = await createCharacter(player);
 
     await answer(player, session.id, { status: 'yes', characterId: character.id });
+    const detached = await setCharacter(player, session.id, null);
+
+    expect(detached.statusCode).toBe(409);
+    expect(detached.json().error.message).toContain('investigateur');
+  });
+
+  it('detaches the investigator of a player who is not coming', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+    const character = await createCharacter(player);
+
+    await answer(player, session.id, { status: 'yes', characterId: character.id });
+    await answer(player, session.id, { status: 'no' });
     const detached = await setCharacter(player, session.id, null);
 
     expect(detached.statusCode).toBe(200);
@@ -478,10 +561,10 @@ describe('Participation', () => {
     expect(response.statusCode).toBe(404);
   });
 
-  it('says nothing about a player who has not named a character', async () => {
+  it('says nothing about a player who is not coming', async () => {
     const { gm, player, tableId } = await tableWithPlayer();
     const session = await scheduleSession(gm, tableId);
-    await answer(player, session.id, { status: 'yes' });
+    await answer(player, session.id, { status: 'no' });
 
     const response = await context.app.inject({
       method: 'GET',
@@ -575,7 +658,8 @@ describe('Game master transfer', () => {
   it('drops the new game master out of the sessions still ahead', async () => {
     const { gm, player, tableId } = await tableWithPlayer();
     const upcoming = await scheduleSession(gm, tableId);
-    await answer(player, upcoming.id, { status: 'yes' });
+    const character = await createCharacter(player);
+    await answer(player, upcoming.id, { status: 'yes', characterId: character.id });
 
     await transferTo(gm, tableId, player.userId);
 
@@ -633,7 +717,11 @@ describe('Game master transfer', () => {
     // Roles really did move: the former player now schedules, and the former
     // game master answers like anyone else.
     const session = await scheduleSession(player, tableId);
-    const response = await answer(gm, session.id, { status: 'yes' });
+    const character = await createCharacter(gm);
+    const response = await answer(gm, session.id, {
+      status: 'yes',
+      characterId: character.id,
+    });
 
     expect(response.statusCode).toBe(200);
     expect(response.json().myStatus).toBe('yes');
