@@ -3,10 +3,21 @@
 # Only Caddy publishes ports: the API and PostgreSQL stay on the internal
 # Docker network, so the firewall only ever needs 80/443 open (plus SSH).
 
+# La politique de confidentialité annonce des journaux gardés dans un tampon
+# glissant. Sans cette rotation, le pilote par défaut les garde tant que le
+# conteneur vit — et Caddy, lui, tourne des semaines d'affilée : la promesse
+# serait fausse, et les journaux d'adresses IP sans fin.
+x-journaux: &journaux
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
 services:
   db:
     image: postgres:17-alpine
     restart: unless-stopped
+    logging: *journaux
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -24,6 +35,7 @@ services:
   api:
     build: .
     restart: unless-stopped
+    logging: *journaux
     env_file: .env
     depends_on:
       db:
@@ -44,6 +56,7 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    logging: *journaux
     ports:
       - '80:80'
       - '443:443'
@@ -51,6 +64,7 @@ services:
       API_DOMAIN: ${API_DOMAIN}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./web:/srv/web:ro
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
