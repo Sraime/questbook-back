@@ -28,9 +28,12 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
-async function tableWithSession() {
-  const gm = await signIn(context, 'gm');
-  const player = await signIn(context, 'player');
+/// Le suffixe sert aux tests qui font jouer deux tables en meme temps : sans
+/// lui, deux appels signeraient le meme `gm` et le meme `player`, et une fuite
+/// d'une soiree a l'autre passerait pour un acces legitime.
+async function tableWithSession(suffix = '') {
+  const gm = await signIn(context, `gm${suffix}`);
+  const player = await signIn(context, `player${suffix}`);
   const table = await createTable(context, gm);
   await joinTable(context, gm, player, table.id);
 
@@ -221,11 +224,19 @@ describe('session board, live', () => {
     });
   }
 
-  /// Le prochain message, ou un echec au bout de deux secondes : une attente
-  /// sans borne ferait pendre la suite au lieu de la faire echouer.
-  function nextMessage(socket: WebSocket): Promise<Record<string, unknown>> {
+  /// Le prochain message, ou un echec au bout de cinq secondes : une attente
+  /// sans borne ferait pendre la suite au lieu de la faire echouer. La borne
+  /// etait de deux secondes, et une passe a froid la depassait sur le test
+  /// qui monte deux tables avant d'ouvrir son premier socket.
+  function nextMessage(
+    socket: WebSocket,
+    label = 'a message',
+  ): Promise<Record<string, unknown>> {
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('No message')), 2000);
+      const timer = setTimeout(
+        () => reject(new Error(`Waited for ${label}, nothing came`)),
+        5000,
+      );
       socket.once('message', (data) => {
         clearTimeout(timer);
         resolve(JSON.parse(data.toString()));
@@ -239,6 +250,17 @@ describe('session board, live', () => {
 
   const closed = (socket: WebSocket) =>
     new Promise<void>((resolve) => socket.once('close', () => resolve()));
+
+  /// L'inverse de `nextMessage` : tout ce qu'un socket a dit, pour qu'une
+  /// isolation se lise comme une liste vide. Un `nextMessage` qui expire
+  /// dirait la meme chose, mais il ferait dependre le verdict de la vitesse
+  /// de la machine — c'est ainsi qu'on ecrit un test qui passe parce qu'il
+  /// n'a pas attendu assez.
+  function everythingHeard(socket: WebSocket): string[] {
+    const heard: string[] = [];
+    socket.on('message', (data) => heard.push(data.toString()));
+    return heard;
+  }
 
   it('sends the whole board on connection, before anything moves', async () => {
     // Sans ce premier message, le joueur devrait aussi appeler `GET` et
@@ -322,6 +344,89 @@ describe('session board, live', () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(context.app.boardLive.listeners(sessionId)).toBe(0);
+  });
+
+  it('keeps two tables playing the same evening apart', async () => {
+    // Deux soirees partagent un processus et une seule `BoardLiveRegistry`.
+    // Le jour ou la cle d'une salle serait recalculee ailleurs, rien a l'ecran
+    // ne le dirait : c'est ce test qui doit le dire.
+    const providence = await tableWithSession('-providence');
+    const arkham = await tableWithSession('-arkham');
+
+    const base = await listen();
+    const watchingProvidence = connect(
+      base,
+      providence.sessionId,
+      providence.player,
+    );
+    const watchingArkham = connect(base, arkham.sessionId, arkham.player);
+
+    // Le plateau d'ouverture, celui que chacun recoit pour lui-meme. Les deux
+    // attentes sont armees avant d'en attendre une seule : le plateau d'Arkham
+    // arrive parfois pendant qu'on attend celui de Providence, et un `ws` sans
+    // ecoutant a cet instant jette l'evenement. C'est ce qui rendait ce test
+    // capricieux — il attendait ensuite un second message qui ne venait jamais.
+    const providenceOpening = nextMessage(
+      watchingProvidence,
+      'Providence’s own board',
+    );
+    const arkhamOpening = nextMessage(watchingArkham, 'Arkham’s own board');
+    await providenceOpening;
+    await arkhamOpening;
+
+    const heardInArkham = everythingHeard(watchingArkham);
+    const moved = nextMessage(watchingProvidence, 'the move in Providence');
+    await pushBoard(providence.gm, providence.sessionId, {
+      tokens: twoTokens,
+      mapId: 'manoir',
+    });
+
+    expect(await moved).toMatchObject({
+      type: 'board',
+      board: { tokens: twoTokens, mapId: 'manoir' },
+    });
+
+    // L'attente part de la reception ci-dessus, et non de la poussee : une
+    // fuite serait deja distribuee, il ne lui reste qu'a traverser la boucle
+    // d'evenements. Verifie en cassant l'isolation exprès — sans ce sursis,
+    // le test passait quand meme, le message fuite arrivant un tour trop tard.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(heardInArkham).toEqual([]);
+    // Et ce vide doit venir de l'isolation, pas d'un socket mort.
+    expect(watchingArkham.readyState).toBe(WebSocket.OPEN);
+
+    watchingProvidence.close();
+    watchingArkham.close();
+    await Promise.all([closed(watchingProvidence), closed(watchingArkham)]);
+  });
+
+  it('empties one room without touching the other', async () => {
+    const providence = await tableWithSession('-providence');
+    const arkham = await tableWithSession('-arkham');
+
+    const base = await listen();
+    const leaving = connect(base, providence.sessionId, providence.player);
+    const staying = connect(base, arkham.sessionId, arkham.player);
+    // Les deux attentes d'abord, pour la raison dite au test precedent.
+    const opened = Promise.all([
+      nextMessage(leaving, 'the board of the one who leaves'),
+      nextMessage(staying, 'the board of the one who stays'),
+    ]);
+    await opened;
+
+    expect(context.app.boardLive.listeners(providence.sessionId)).toBe(1);
+    expect(context.app.boardLive.listeners(arkham.sessionId)).toBe(1);
+
+    leaving.close();
+    await closed(leaving);
+    // La fermeture du socket precede de peu celle vue par le serveur.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(context.app.boardLive.listeners(providence.sessionId)).toBe(0);
+    expect(context.app.boardLive.listeners(arkham.sessionId)).toBe(1);
+
+    staying.close();
+    await closed(staying);
   });
 
   it('leaves a board pushed while nobody listens perfectly readable',

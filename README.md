@@ -110,7 +110,7 @@ garde une identité unique sur tous les appareils, sans table de correspondance.
 | `table_invitations`   | Invitations, jeton stocké **haché** comme les refresh tokens      |
 | `game_sessions`       | Séance : titre, description, date/heure, lieu, statut, scénario optionnel |
 | `session_attendances` | Réponses des joueurs (`yes` / `no`) et personnage joué, exigé pour un `yes` |
-| `scenarios`           | Catalogue d'aventures, écrites côté serveur (pas par les joueurs) |
+| `scenarios`           | Catalogue de scénarios, écrits côté serveur (pas par les joueurs) |
 | `scenario_annexes`    | Cartes, indices, documents d'un scénario                          |
 | `session_boards`      | La carte et les pions d'une session, tels que le MJ les a poussés   |
 | `scenario_ownerships` | Qui possède un scénario (`grant` à la connexion, `purchase` depuis la boutique) |
@@ -478,10 +478,10 @@ n'aurait rien à vendre. C'est `owned` qui fait disparaître le bouton d'achat,
 d'où sa présence dès le résumé.
 
 **La description voyage dès le résumé**, ce qui n'a pas toujours été le cas :
-elle était réservée au détail, jusqu'à ce que l'app affiche les aventures
-pleine largeur avec quelques lignes de ce dont elles parlent. Une aventure
-dont on ne peut rien lire est une aventure que personne n'ouvre. Le détail
-garde ce qu'il avait en plus, `scenario_id`.
+elle était réservée au détail, jusqu'à ce que l'app affiche les scénarios
+pleine largeur avec quelques lignes de ce dont ils parlent. Un scénario dont
+on ne peut rien lire est un scénario que personne n'ouvre. Le détail garde ce
+qu'il avait en plus, `scenario_id`.
 
 **L'achat est idempotent**, plutôt que 409 sur un article déjà détenu : un
 double appui ne doit pas faire surgir une erreur, et le jour où de l'argent
@@ -493,13 +493,13 @@ n'en porte que la clé. Même chose pour `image_key`, qui nomme une image
 embarquée dans l'app et non une URL : rien ici n'héberge de fichier.
 
 Acheter un article de type `scenario` écrit une ligne dans
-`scenario_ownerships` avec `source: 'purchase'` — la lecture d'une aventure
+`scenario_ownerships` avec `source: 'purchase'` — la lecture d'un scénario
 reste gardée par cette table, si bien que rien en aval n'a à connaître
 l'existence de la boutique. Le type `pack` n'a pas encore de contenu
 modélisé et son achat est refusé. Un article au prix non nul l'est aussi, tant
 qu'aucun paiement n'existe : sans ce garde-fou, il serait donné.
 
-**Deux aventures sont en rayon**, semées par
+**Deux scénarios sont en rayon**, semés par
 `20260921120000_shop_scenarios` : « Le Dernier Train de Nuit » et
 « L'Herbier de Madame Sauvel ». Leur `grant_on_signup` est faux, à la
 différence du Phare de Kerloc'h — les donner à l'inscription reviendrait à
