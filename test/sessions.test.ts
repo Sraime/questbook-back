@@ -417,6 +417,26 @@ describe('Participation', () => {
     expect(await notificationTypes(gm)).toContain('attendance_character_changed');
   });
 
+  /// Le mot qu'un joueur lit est « investigateur », jamais « personnage » :
+  /// une notification est du texte produit, soumis au même vocabulaire que
+  /// l'app.
+  it('names the investigator as such to the game master', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+    const character = await createCharacter(player, { name: 'Ernest Blackwood' });
+
+    await answer(player, session.id, { status: 'yes', characterId: character.id });
+    await answer(player, session.id, { status: 'no' });
+    await setCharacter(player, session.id, null);
+
+    const notice = (await notifications(gm)).find(
+      (row) => row.type === 'attendance_character_changed',
+    );
+
+    expect(notice?.title).toContain('Investigateur');
+    expect(notice?.body).toContain("n'a plus d'investigateur");
+  });
+
   it('keeps the character when the answer is sent again without one', async () => {
     const { gm, player, tableId } = await tableWithPlayer();
     const session = await scheduleSession(gm, tableId);
