@@ -112,6 +112,7 @@ garde une identité unique sur tous les appareils, sans table de correspondance.
 | `session_attendances` | Réponses des joueurs (`yes` / `no`) et personnage joué, optionnel |
 | `scenarios`           | Catalogue d'aventures, écrites côté serveur (pas par les joueurs) |
 | `scenario_annexes`    | Cartes, indices, documents d'un scénario                          |
+| `session_boards`      | La carte et les pions d'une session, tels que le MJ les a poussés   |
 | `scenario_ownerships` | Qui possède un scénario (`grant` à la connexion, `purchase` depuis la boutique) |
 | `shop_items`          | Catalogue de la boutique : titre, type, description, prix, clés d'image et d'asset |
 | `shop_item_ownerships`| Qui a acheté quoi                                                 |
@@ -295,6 +296,9 @@ la supprimer.
 | `POST`   | `/sessions/:id/npcs`                           | En ajouter un (MJ, 201)                           |
 | `PATCH`  | `/sessions/:id/npcs/:npcId`                    | Nom, description (MJ)                             |
 | `DELETE` | `/sessions/:id/npcs/:npcId`                    | Le retirer (MJ, 204)                              |
+| `GET`    | `/sessions/:id/board`                          | Le plateau, lisible par toute la table            |
+| `PUT`    | `/sessions/:id/board`                          | Le remplacer entier (MJ)                          |
+| `GET`    | `/sessions/:id/board/live`                     | WebSocket : le plateau, puis chaque poussée       |
 
 Le MJ n'est pas un participant : il anime la séance, ne répond pas et n'est pas
 compté parmi les joueurs attendus. `PUT /sessions/:id/attendance` lui répond 403.
@@ -303,6 +307,66 @@ Le champ `nextSessionAt` d'une table ne désigne **que** des séances à venir, 
 vaut `null` s'il n'y en a aucune. Rien ne fait changer de statut une session une
 fois qu'elle a eu lieu : sans ce filtre, la plus ancienne séance `scheduled`
 resterait éternellement en tête et masquerait celle que les joueurs attendent.
+
+#### Le plateau, et pourquoi il est monté ici
+
+Le plateau vivait sur l'appareil seul. Il est remonté le jour où un joueur a dû
+le regarder bouger : une table est partagée, donc ce que tout le monde regarde
+ne peut pas rester privé à une tablette.
+
+**L'appareil du MJ reste la vérité.** Il écrit en local d'abord et pousse quand
+il peut — une soirée dans une cave sans couverture doit continuer de marcher, et
+un plateau qui demanderait le réseau pour déplacer un pion serait inutile
+précisément là où on l'utilise. `session_boards` est donc une **copie que les
+joueurs lisent**, et la dernière poussée gagne sans fusion : un seul compte y
+écrit jamais.
+
+Trois conséquences :
+
+- **Le plateau arrive entier, jamais en différence.** L'appareil détient l'état
+  complet, et envoyer un delta laisserait les deux s'écarter au premier message
+  perdu. `revision` monte de un à chaque poussée, ce qui permet à un écoutant
+  d'écarter un message arrivé en retard.
+- **Les pions restent opaques.** `tokens` est la même chaîne JSON que l'app
+  garde en local ; le serveur vérifie qu'il s'agit d'un tableau et sa taille,
+  rien de plus. Connaître la forme d'un pion est le travail du client, et un
+  serveur qui la validait devrait être mis à jour avant qu'un nouveau type de
+  pion puisse être posé.
+- **C'est l'image inverse des PNJ.** Là, le MJ seul lit ; ici, toute la table
+  lit et le MJ seul écrit. Un plateau est fait pour être vu, une créature
+  préparée est faite pour ne pas l'être.
+
+Un plateau jamais poussé répond **un plateau vide, pas un 404** : la session
+existe, et un joueur peut l'ouvrir avant que le MJ ait posé quoi que ce soit.
+
+##### Le canal temps réel
+
+`GET /sessions/:id/board/live` est une **WebSocket** (`@fastify/websocket`),
+authentifiée par le même en-tête `Authorization` que le reste — la poignée de
+main est une requête HTTP comme une autre. Elle envoie d'abord le plateau
+entier, puis un message `{ "type": "board", "board": … }` à chaque poussée du
+MJ. Sans ce premier message, le client devrait aussi appeler `GET` et verrait un
+plateau vide jusqu'au geste suivant.
+
+Le choix d'une WebSocket plutôt que d'une interrogation périodique tient au
+ressenti : un pion qu'on voit bouger trois secondes après le MJ donne
+l'impression de regarder un enregistrement, et une table qui joue ne supporte
+pas ce décalage.
+
+**Qui écoute quoi est gardé en mémoire** (`BoardLiveRegistry`), et non en base :
+ce n'est pas un fait sur la soirée, c'est la liste des sockets que ce processus
+détient. La perdre à un redémarrage est correct — les sockets meurent avec le
+processus, et chaque client se reconnecte et redemande le plateau.
+
+> **Cela ne marche que parce que l'API tourne en un seul processus.** Le jour
+> où elle tournera en deux derrière Caddy, un MJ servi par l'une pousserait
+> vers des écoutants que l'autre détient, et rien n'arriverait. C'est le moment
+> où il faudra un courtier entre les deux, et la raison pour laquelle cette
+> classe est assez petite pour être remplacée.
+
+Un socket qui refuse un message est retiré plutôt que réessayé : le plateau est
+un état, pas un flux d'événements, donc la poussée suivante porte tout ce que
+la manquée portait.
 
 #### Les deux instants qui bornent une séance
 

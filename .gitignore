@@ -8,6 +8,9 @@ coverage/
 !.env.example
 
 *.log
+# Ce que `npm run dev` lance en arriere-plan y deverse sa sortie.
+api.out
+api.err
 .DS_Store
 .idea/
 .vscode/

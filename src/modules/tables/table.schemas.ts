@@ -91,6 +91,30 @@ export const sessionNpcParamsSchema = z.object({
   npcId: idSchema,
 });
 
+/// The board arrives whole, as the opaque JSON the app already keeps on the
+/// device. The server checks that it is a JSON array and how big it is,
+/// nothing more: knowing the shape of a pawn is the client's job, and a
+/// server that validated it would have to be updated before any new kind of
+/// pawn could be placed.
+///
+/// The ceiling is a guard against a runaway client, not a design limit — a
+/// hundred kilobytes is several hundred pawns.
+export const replaceBoardSchema = z.object({
+  tokens: z
+    .string()
+    .max(100_000)
+    .refine((value) => {
+      try {
+        return Array.isArray(JSON.parse(value));
+      } catch {
+        return false;
+      }
+    }, { message: 'tokens must be a JSON array' }),
+  mapId: z.string().trim().min(1).max(120).nullish(),
+});
+
+export type ReplaceBoardInput = z.infer<typeof replaceBoardSchema>;
+
 export const tableIdParamsSchema = z.object({ id: idSchema });
 
 export const tableMemberParamsSchema = z.object({

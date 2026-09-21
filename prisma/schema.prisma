@@ -213,6 +213,7 @@ model GameSession {
   scenario    Scenario?           @relation(fields: [scenarioId], references: [id], onDelete: SetNull)
   attendances SessionAttendance[]
   npcs        SessionNpc[]
+  board       SessionBoard?
 
   @@index([tableId, startsAt])
   @@map("game_sessions")
@@ -348,6 +349,35 @@ model ScenarioOwnership {
   @@unique([userId, scenarioId])
   @@index([userId])
   @@map("scenario_ownerships")
+}
+
+/// The map and the pawns of a session, as the game master last pushed them.
+///
+/// The board used to live on the device alone. It came up here the day a
+/// player had to watch it move: a table is shared, so what everyone looks at
+/// cannot be private to one tablet.
+///
+/// **The game master's device stays the authority.** It writes locally first
+/// and pushes when it can — an evening in a cellar with no coverage must keep
+/// working, and a board that needed the network to move a pawn would be
+/// useless exactly when it is used. This row is therefore a copy that
+/// players read, and the last push wins without merging: only one account
+/// ever writes it.
+///
+/// `tokens` is the same opaque JSON the app already stores locally, so
+/// adding a field to a pawn needs no migration here. `revision` climbs by one
+/// on each push, which lets a listener drop a message that arrives out of
+/// order.
+model SessionBoard {
+  sessionId String   @id @map("session_id")
+  tokens    String   @default("[]") @db.Text
+  mapId     String?  @map("map_id")
+  revision  Int      @default(0)
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  session GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("session_boards")
 }
 
 /// A missing row means "has not answered yet", which is deliberately distinct
