@@ -380,7 +380,7 @@ s'achètent à la boutique. Un id inconnu ou non possédé répond **404**, pas
 | Méthode | Route                      | Description                                        |
 | ------- | -------------------------- | -------------------------------------------------- |
 | `GET`   | `/shop/items`              | Tout le catalogue, chaque article portant `owned`  |
-| `GET`   | `/shop/items/:id`          | Détail d'un article, description comprise          |
+| `GET`   | `/shop/items/:id`          | Détail d'un article, `scenario_id` compris         |
 | `POST`  | `/shop/items/:id/purchase` | Accorde l'article et le renvoie possédé            |
 
 Trois partis pris valent d'être connus.
@@ -389,6 +389,12 @@ Trois partis pris valent d'être connus.
 voit que ce qu'on détient. Une boutique qui cacherait ce qu'on n'a pas acheté
 n'aurait rien à vendre. C'est `owned` qui fait disparaître le bouton d'achat,
 d'où sa présence dès le résumé.
+
+**La description voyage dès le résumé**, ce qui n'a pas toujours été le cas :
+elle était réservée au détail, jusqu'à ce que l'app affiche les aventures
+pleine largeur avec quelques lignes de ce dont elles parlent. Une aventure
+dont on ne peut rien lire est une aventure que personne n'ouvre. Le détail
+garde ce qu'il avait en plus, `scenario_id`.
 
 **L'achat est idempotent**, plutôt que 409 sur un article déjà détenu : un
 double appui ne doit pas faire surgir une erreur, et le jour où de l'argent
@@ -405,6 +411,13 @@ reste gardée par cette table, si bien que rien en aval n'a à connaître
 l'existence de la boutique. Le type `pack` n'a pas encore de contenu
 modélisé et son achat est refusé. Un article au prix non nul l'est aussi, tant
 qu'aucun paiement n'existe : sans ce garde-fou, il serait donné.
+
+**Deux aventures sont en rayon**, semées par
+`20260921120000_shop_scenarios` : « Le Dernier Train de Nuit » et
+« L'Herbier de Madame Sauvel ». Leur `grant_on_signup` est faux, à la
+différence du Phare de Kerloc'h — les donner à l'inscription reviendrait à
+n'avoir rien à vendre. Leur prix est nul comme tout le reste du rayon, faute
+de paiement ; c'est ce qui les rend achetables aujourd'hui.
 
 ### Notifications et appareils
 
