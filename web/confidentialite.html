@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Politique de confidentialité — Questbook</title>
+    <meta
+      name="description"
+      content="Ce que Questbook collecte, pourquoi, avec qui, et comment tout effacer."
+    />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Politique de confidentialité</h1>
+        <p class="date">Questbook — en vigueur depuis le 21 septembre 2026</p>
+      </header>
+
+      <p>
+        Questbook est un compagnon de jeu de rôle sur table. Il tient vos
+        investigateurs, vos tables et vos séances, et permet à plusieurs
+        personnes de jouer ensemble. Cela suppose un compte, et donc quelques
+        données. Cette page dit lesquelles, pourquoi, et ce qu'il advient
+        d'elles.
+      </p>
+
+      <h2>Qui est responsable</h2>
+      <p>
+        <strong>NextUs</strong>, éditeur de Questbook, est responsable du
+        traitement de ces données. Pour toute question ou demande relative à
+        vos données :
+        <a href="mailto:support@nextuscorp.com">support@nextuscorp.com</a>.
+      </p>
+
+      <h2>Ce que Questbook collecte, et pourquoi</h2>
+
+      <div class="tableau">
+        <table>
+          <thead>
+            <tr>
+              <th>Données</th>
+              <th>D'où elles viennent</th>
+              <th>À quoi elles servent</th>
+              <th>Base légale</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                Identifiant de compte Google, adresse e-mail, nom, adresse de
+                la photo de profil, langue
+              </td>
+              <td>Votre connexion Google</td>
+              <td>
+                Reconnaître votre compte, vous afficher aux autres joueurs de
+                vos tables, vous inviter par votre adresse
+              </td>
+              <td>Exécution du service que vous demandez</td>
+            </tr>
+            <tr>
+              <td>
+                Vos investigateurs, vos tables, vos séances et vos réponses,
+                les plateaux, les personnages non-joueurs, vos notes et vos
+                achats
+              </td>
+              <td>Ce que vous créez dans l'application</td>
+              <td>
+                Être là au lancement suivant, et sur vos autres appareils
+              </td>
+              <td>Exécution du service que vous demandez</td>
+            </tr>
+            <tr>
+              <td>Un identifiant d'appareil pour les notifications</td>
+              <td>Votre appareil, via Firebase Cloud Messaging</td>
+              <td>
+                Vous prévenir d'une invitation ou d'une séance proposée
+              </td>
+              <td>Exécution du service que vous demandez</td>
+            </tr>
+            <tr>
+              <td>Des jetons de session</td>
+              <td>Le serveur, à votre connexion</td>
+              <td>
+                Vous éviter de vous reconnecter à chaque ouverture
+              </td>
+              <td>Exécution du service que vous demandez</td>
+            </tr>
+            <tr>
+              <td>
+                Journaux techniques : adresse IP, date, adresse appelée
+              </td>
+              <td>Automatiquement, à chaque requête</td>
+              <td>
+                Repérer une panne ou un abus, et rien d'autre
+              </td>
+              <td>Intérêt légitime à faire tenir le service debout</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>
+        Ces journaux sont volontairement amputés de ce qui n'a rien à y faire :
+        l'en-tête d'authentification est supprimé avant écriture, et les jetons
+        contenus dans les liens d'invitation y sont remplacés par une mention
+        neutre. Ils sont conservés dans un tampon de taille limitée : passé
+        cette taille, les plus anciens sont effacés par les plus récents. Rien
+        n'en est archivé ailleurs.
+      </p>
+
+      <h3>Quand vous invitez quelqu'un</h3>
+      <p>
+        Inviter un joueur à votre table demande son adresse e-mail. Cette
+        adresse est enregistrée le temps que l'invitation vive, et sert à lui
+        envoyer un message. Si cette personne ne possède pas de compte
+        Questbook, son adresse n'en crée pas un pour autant : elle reste une
+        invitation en attente, que vous pouvez retirer, et que la personne
+        concernée peut nous demander d'effacer.
+      </p>
+
+      <h2>Ce que Questbook ne fait pas</h2>
+      <ul>
+        <li>Aucune publicité, et aucune régie publicitaire embarquée.</li>
+        <li>
+          Aucune mesure d'audience ni outil d'analyse comportementale : le seul
+          composant Google présent dans l'application sert à recevoir les
+          notifications.
+        </li>
+        <li>Aucun profilage, aucune décision automatisée vous concernant.</li>
+        <li>
+          Aucune vente, location ou cession de vos données à qui que ce soit.
+        </li>
+        <li>
+          Aucun accès à votre position, à vos contacts, à vos photos ou à vos
+          fichiers.
+        </li>
+      </ul>
+
+      <h2>Qui d'autre y a accès</h2>
+      <p>
+        Trois prestataires interviennent, chacun pour une tâche précise, et
+        aucun n'est autorisé à en faire autre chose :
+      </p>
+      <div class="tableau">
+        <table>
+          <thead>
+            <tr>
+              <th>Prestataire</th>
+              <th>Rôle</th>
+              <th>Ce qu'il voit</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Google</td>
+              <td>Connexion au compte et notifications</td>
+              <td>
+                Votre identité Google, et l'identifiant d'appareil des
+                notifications
+              </td>
+            </tr>
+            <tr>
+              <td>Resend</td>
+              <td>Envoi des e-mails d'invitation</td>
+              <td>L'adresse du destinataire et le contenu du message</td>
+            </tr>
+            <tr>
+              <td>OVH</td>
+              <td>Hébergement du serveur et de la base de données</td>
+              <td>
+                Rien en propre : les données résident sur des serveurs situés
+                en France
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        Google et Resend étant établis aux États-Unis, les transferts vers ces
+        deux prestataires s'appuient sur les garanties prévues par le règlement
+        européen, à savoir les clauses contractuelles types de la Commission et
+        leur certification au cadre de protection des données UE–États-Unis.
+      </p>
+
+      <h2>Combien de temps</h2>
+      <p>
+        Vos données vivent aussi longtemps que votre compte. Vous le supprimez,
+        elles disparaissent — immédiatement et sans copie de courtoisie. Les
+        journaux techniques, eux, s'effacent d'eux-mêmes comme décrit plus
+        haut, et les jetons de session expirent d'office.
+      </p>
+
+      <h2>Vos droits</h2>
+      <p>
+        Le règlement général sur la protection des données vous donne un droit
+        d'accès, de rectification, d'effacement, de portabilité, d'opposition
+        et de limitation. Deux d'entre eux s'exercent directement dans
+        l'application : le pseudo se modifie depuis l'écran Profil, et la
+        suppression du compte se trouve tout en bas de ce même écran. Pour les
+        autres, écrivez à
+        <a href="mailto:support@nextuscorp.com">support@nextuscorp.com</a> ;
+        nous répondons sous un mois.
+      </p>
+      <p>
+        Si notre réponse ne vous satisfait pas, vous pouvez saisir la
+        Commission nationale de l'informatique et des libertés
+        (<a href="https://www.cnil.fr" rel="noopener">cnil.fr</a>).
+      </p>
+
+      <h2>Supprimer son compte</h2>
+      <p>
+        Dans l'application : <strong>Profil</strong>, tout en bas,
+        <strong>Supprimer mon compte</strong>. C'est immédiat et définitif.
+      </p>
+      <div class="avertissement">
+        <p>
+          <strong>Une conséquence à connaître avant de le faire.</strong> Si
+          vous êtes maître du jeu d'une ou plusieurs tables, ces tables
+          disparaissent avec votre compte, pour tous leurs joueurs, avec leurs
+          séances. Une table sans meneur n'a personne pour la reprendre. Si
+          vous souhaitez qu'elle survive, confiez-la d'abord à un autre joueur
+          depuis l'écran de la table.
+        </p>
+      </div>
+      <p>
+        Vos investigateurs, eux, ne tiennent qu'à vous : ils s'en vont avec le
+        compte.
+      </p>
+      <p>
+        Le détail de ce que la suppression emporte se trouve sur la page
+        <a href="/suppression-du-compte">Supprimer son compte et ses données</a>.
+      </p>
+
+      <h2>Les enfants</h2>
+      <p>
+        Questbook n'est pas destiné aux enfants de moins de treize ans et ne
+        cherche pas à en attirer. Si vous êtes responsable d'un enfant plus
+        jeune dont un compte aurait été créé, écrivez-nous : nous
+        l'effacerons.
+      </p>
+
+      <h2>Si cette politique change</h2>
+      <p>
+        Toute modification sera publiée sur cette page, avec sa date. Un
+        changement qui toucherait à ce que nous collectons ou à qui y a accès
+        vous sera signalé dans l'application avant d'entrer en vigueur.
+      </p>
+
+      <footer>
+        <p>
+          NextUs — Questbook ·
+          <a href="mailto:support@nextuscorp.com">support@nextuscorp.com</a> ·
+          <a href="/suppression-du-compte">Supprimer son compte</a>
+        </p>
+      </footer>
+    </main>
+  </body>
+</html>

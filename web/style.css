@@ -1,0 +1,105 @@
+/* Une page lue depuis la fiche d'un store, donc sur un téléphone neuf fois sur
+   dix : pas de police à télécharger, pas de script, rien qui puisse manquer. */
+
+:root {
+  color-scheme: light;
+  --encre: #241c17;
+  --encre-pale: #5c4f45;
+  --papier: #f6f1e7;
+  --filet: #ddd2bf;
+  --cuir: #7a4b2a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 2.5rem 1.25rem 5rem;
+  background: var(--papier);
+  color: var(--encre);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 1.0625rem;
+  line-height: 1.65;
+}
+
+main {
+  max-width: 44rem;
+  margin: 0 auto;
+}
+
+header {
+  border-bottom: 1px solid var(--filet);
+  margin-bottom: 2.5rem;
+  padding-bottom: 1.5rem;
+}
+
+h1 {
+  font-size: 1.9rem;
+  line-height: 1.2;
+  margin: 0 0 0.5rem;
+}
+
+h2 {
+  font-size: 1.25rem;
+  margin: 2.75rem 0 0.75rem;
+  border-bottom: 1px solid var(--filet);
+  padding-bottom: 0.4rem;
+}
+
+h3 {
+  font-size: 1.05rem;
+  margin: 1.75rem 0 0.5rem;
+}
+
+.date {
+  color: var(--encre-pale);
+  font-size: 0.9rem;
+  font-style: italic;
+  margin: 0;
+}
+
+a {
+  color: var(--cuir);
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1.25rem 0;
+  font-size: 0.95rem;
+}
+
+th,
+td {
+  border: 1px solid var(--filet);
+  padding: 0.6rem 0.7rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  background: #eee7d9;
+  font-weight: 600;
+}
+
+/* Un tableau de quatre colonnes ne tient pas sur un téléphone ; le laisser
+   défiler vaut mieux que de le comprimer en colonnes d'un mot. */
+.tableau {
+  overflow-x: auto;
+}
+
+.avertissement {
+  border-left: 3px solid var(--cuir);
+  padding: 0.25rem 0 0.25rem 1rem;
+  margin: 1.5rem 0;
+}
+
+footer {
+  border-top: 1px solid var(--filet);
+  margin-top: 3.5rem;
+  padding-top: 1.25rem;
+  color: var(--encre-pale);
+  font-size: 0.9rem;
+}

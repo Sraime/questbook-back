@@ -205,11 +205,34 @@ Ce que le code garantit :
 - **Jetons.** Refresh tokens et jetons d'invitation sont stockés **hachés**
   (SHA-256). `.env` est créé avec `umask 077` sur le VPS.
 
+### Les deux pages que les stores exigent
+
+Ni Play ni l'App Store ne publient une fiche sans URL de politique de
+confidentialité, et Play en réclame une seconde décrivant la suppression du
+compte. Elles sont servies par Caddy, sur le domaine de l'API :
+
+| Page | Fichier |
+| --- | --- |
+| <https://questbook.nextuscorp.com/confidentialite> | `web/confidentialite.html` |
+| <https://questbook.nextuscorp.com/suppression-du-compte> | `web/suppression-du-compte.html` |
+
+Pas de site à part : le certificat est déjà là, et un second domaine serait
+une échéance de plus à oublier. Le `Caddyfile` les sert depuis `/srv/web`
+avant de passer la main au reverse proxy, si bien qu'`/api/v1/*` n'est pas
+touché. Ajouter une page demande donc deux gestes — le fichier dans `web/`,
+et son chemin dans le matcher `@pages`.
+
+**Ce qu'elles annoncent doit rester vrai.** La politique décrit des journaux
+gardés dans un tampon de taille limitée : c'est la rotation déclarée par
+l'ancre `x-journaux` de `docker-compose.yml` (10 Mo, trois fichiers, par
+service) qui la rend exacte. Sans elle, le pilote par défaut garderait tout
+tant que le conteneur vit — et Caddy tourne des semaines d'affilée. Modifier
+l'une sans l'autre transforme la page en fausse déclaration.
+
 Ce qui reste une affaire d'exploitation, pas de code (voir aussi le VPS) :
 
 - chiffrement du disque du VPS et des sauvegardes du volume Postgres ;
-- politique de conservation / suppression de compte (droit à l'effacement) ;
-- politique de confidentialité et DPA Resend, avant une ouverture publique.
+- DPA Resend, avant une ouverture publique.
 
 ---
 
