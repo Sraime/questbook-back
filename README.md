@@ -109,7 +109,7 @@ garde une identité unique sur tous les appareils, sans table de correspondance.
 | `table_members`       | Appartenance et rôle (`gm` / `player`)                            |
 | `table_invitations`   | Invitations, jeton stocké **haché** comme les refresh tokens      |
 | `game_sessions`       | Séance : titre, description, date/heure, lieu, statut, scénario optionnel |
-| `session_attendances` | Réponses des joueurs (`yes` / `no`) et personnage joué, optionnel |
+| `session_attendances` | Réponses des joueurs (`yes` / `no`) et personnage joué, exigé pour un `yes` |
 | `scenarios`           | Catalogue d'aventures, écrites côté serveur (pas par les joueurs) |
 | `scenario_annexes`    | Cartes, indices, documents d'un scénario                          |
 | `session_boards`      | La carte et les pions d'une session, tels que le MJ les a poussés   |
@@ -289,8 +289,8 @@ la supprimer.
 | `GET`    | `/sessions/:id`                                | Détail et réponses de chacun                      |
 | `PATCH`  | `/sessions/:id`                                | Titre, description, date, lieu, scénario (MJ) |
 | `DELETE` | `/sessions/:id`                                | Annulation — la session reste visible             |
-| `PUT`    | `/sessions/:id/attendance`                     | `{ "status", "characterId"? }`, modifiable        |
-| `PUT`    | `/sessions/:id/attendance/character`           | Poser, changer ou retirer le personnage           |
+| `PUT`    | `/sessions/:id/attendance`                     | `{ "status", "characterId"? }` — venir exige un personnage |
+| `PUT`    | `/sessions/:id/attendance/character`           | En changer, jusqu'à la fin de la séance           |
 | `GET`    | `/sessions/:id/attendances/:userId/character`  | Fiche d'un participant, lisible par la table      |
 | `GET`    | `/sessions/:id/npcs`                           | Personnages non-joueurs (MJ seul)                 |
 | `POST`   | `/sessions/:id/npcs`                           | En ajouter un (MJ, 201)                           |
@@ -391,15 +391,38 @@ restent ouvertes jusqu'à 19 h. Proposée à 18 h pour 20 h, elles ferment bien 
 20 h — le délai ne raccourcit jamais rien, il ne fait qu'éviter une fenêtre
 trop courte.
 
-Passé `answersCloseAt`, `PUT /sessions/:id/attendance` et
-`PUT /sessions/:id/attendance/character` répondent 409. Le MJ, lui, continue de
-corriger sa séance : déplacer le lieu à mi-partie est précisément ce que les
-24 heures autorisent.
+Passé `answersCloseAt`, `PUT /sessions/:id/attendance` répond 409. Le MJ, lui,
+continue de corriger sa séance : déplacer le lieu à mi-partie est précisément
+ce que les 24 heures autorisent.
 
-Le personnage est facultatif et dissocié de la réponse : un joueur confirme
-d'abord et dit plus tard avec qui il vient. Les deux gestes notifient le MJ
-séparément (`attendance_changed`, `attendance_character_changed`), parce qu'ils
-lui apprennent deux choses différentes.
+**`PUT /sessions/:id/attendance/character` suit `closesAt`, pas
+`answersCloseAt`** : qui vient et avec qui ne ferment pas au même instant. Le
+MJ a compté ses joueurs et ne veut plus d'arrivants, mais qui joue quoi bouge
+encore une fois la table assise — un investigateur meurt, un autre le
+remplace. Fermer les deux ensemble enfermait par ailleurs un joueur ayant
+confirmé sans dire avec qui.
+
+#### Venir, c'est venir avec quelqu'un
+
+`status: 'yes'` **exige un personnage** : celui que la requête nomme, ou celui
+que l'inscription portait déjà — revenir sur un « non » ne le redemande donc
+pas. Sans l'un ni l'autre, 409 : « Dis avec quel investigateur tu viens. »
+Une chaise sans fiche ne sert ni le MJ, qui ne sait pas qui il a en face, ni
+le joueur, à qui l'app refuserait de participer à la séance.
+
+Le corollaire est que **`characterId: null` est refusé sur une inscription
+`yes`** : on ne se décommande pas par la bande, il y a `status: 'no'` pour
+cela. Se décommander, lui, ne demande personne.
+
+La règle vit sur le serveur et non dans la seule fenêtre du client : une
+fenêtre qu'on referme ne garantit rien, et l'app demande d'ailleurs
+l'investigateur *avant* d'appeler — d'où le `characterId` optionnel de
+`PUT /sessions/:id/attendance`, qui rend la confirmation atomique.
+
+Les deux gestes notifient le MJ séparément (`attendance_changed`,
+`attendance_character_changed`), parce qu'ils lui apprennent deux choses
+différentes ; une confirmation nomme l'investigateur dans son corps, puisque
+les deux informations arrivent ensemble.
 
 #### Les personnages non-joueurs
 
