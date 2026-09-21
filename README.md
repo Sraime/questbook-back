@@ -657,6 +657,34 @@ flutter run --dart-define=QUESTBOOK_API_URL=http://10.0.2.2:3000
 > `10.0.2.2` est l'alias de `localhost` vu depuis l'émulateur Android. Sur un
 > téléphone physique, utiliser l'IP LAN de la machine.
 
+### S'asseoir à une table sans second compte Google
+
+Vérifier ce qu'un joueur voit d'une séance demande deux comptes à la même
+table : un MJ qui pousse le plateau, un joueur qui le regarde. Un émulateur
+n'a qu'un compte Google connecté, et en brancher un second est long, manuel
+et à refaire à chaque poste.
+
+Le rôle ne vient pourtant pas de l'appareil, il vient de la table. Deux
+scripts s'appuient là-dessus :
+
+```bash
+npx tsx scripts/seat-a-player.ts                  # les comptes de la base de dev
+npx tsx scripts/seat-a-player.ts questbook.nextus # asseoir celui-ci comme joueur
+npx tsx scripts/push-as-gm.ts <sessionId> 4       # 4 pions, au nom du MJ
+npx tsx scripts/push-as-gm.ts <sessionId> 4 grille # et la carte voulue
+```
+
+`seat-a-player` crée un MJ de contrôle, une table où le compte donné est
+`player`, et une séance **commencée depuis une heure** — de quoi voir
+« Participer » sans attendre. Les inscriptions restent ouvertes une heure
+après la création de la séance, donc on peut encore répondre. Les
+identifiants de carte se lisent dans `board_catalog.dart` de l'app :
+`manoir`, `grille`.
+
+Les deux signent un jeton avec le `JWT_SECRET` local : un compte de
+contrôle n'a pas de compte Google derrière lui, et rien ne le connecterait
+autrement. C'est aussi pourquoi ils n'ont rien à faire en production.
+
 ---
 
 ## Configuration Google Cloud
