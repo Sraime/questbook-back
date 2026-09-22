@@ -1,18 +1,9 @@
 import type { PrismaClient } from '@prisma/client';
 import { badRequest, notFound } from '../../lib/errors.js';
-import { publicLabel } from '../tables/table.access.js';
-
-export interface BlockedUserDto {
-  userId: string;
-  displayName: string;
-  pictureUrl: string | null;
-  blockedAt: string;
-}
 
 /// Ce que le blocage a defait, pour que l'app puisse le dire plutot que de
 /// laisser deviner.
 export interface BlockOutcomeDto {
-  block: BlockedUserDto;
   /// Tables qu'on a quittees, parce qu'on n'en menait pas le jeu.
   tablesLeft: number;
   /// Tables dont on a retire l'autre, parce qu'on en est le MJ. Le MJ ne peut
@@ -22,21 +13,6 @@ export interface BlockOutcomeDto {
 
 export class BlockService {
   constructor(private readonly prisma: PrismaClient) {}
-
-  async list(userId: string): Promise<BlockedUserDto[]> {
-    const rows = await this.prisma.userBlock.findMany({
-      where: { blockerId: userId },
-      include: { blocked: true },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    return rows.map((row) => ({
-      userId: row.blockedId,
-      displayName: publicLabel(row.blocked),
-      pictureUrl: row.blocked.pictureUrl,
-      blockedAt: row.createdAt.toISOString(),
-    }));
-  }
 
   /// Bloquer n'est pas qu'une promesse sur l'avenir : le geste defait aussi
   /// ce qui existe. Tout se fait dans une transaction — un blocage enregistre
@@ -48,6 +24,7 @@ export class BlockService {
 
     const target = await this.prisma.user.findUnique({
       where: { id: targetId },
+      select: { id: true },
     });
     if (!target) {
       throw notFound('User not found');
@@ -57,7 +34,7 @@ export class BlockService {
       // Idempotent : bloquer deux fois est le meme blocage, pas une erreur.
       // Les consequences, elles, se rejouent — une table rejointe depuis le
       // premier blocage doit se defaire comme les autres.
-      const block = await tx.userBlock.upsert({
+      await tx.userBlock.upsert({
         where: { blockerId_blockedId: { blockerId: userId, blockedId: targetId } },
         create: { blockerId: userId, blockedId: targetId },
         update: {},
@@ -108,23 +85,9 @@ export class BlockService {
       }
 
       return {
-        block: {
-          userId: targetId,
-          displayName: publicLabel(target),
-          pictureUrl: target.pictureUrl,
-          blockedAt: block.createdAt.toISOString(),
-        },
         tablesLeft: asPlayer.length,
         playersRemoved: asGameMaster.length,
       };
-    });
-  }
-
-  /// Debloquer ne rend rien : les tables quittees le restent, et il faudra
-  /// une nouvelle invitation. C'est le prix du geste, et l'app le dit avant.
-  async unblock(userId: string, targetId: string): Promise<void> {
-    await this.prisma.userBlock.deleteMany({
-      where: { blockerId: userId, blockedId: targetId },
     });
   }
 
