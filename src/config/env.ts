@@ -43,6 +43,12 @@ const envSchema = z.object({
   RESEND_API_KEY: z.string().default(''),
   EMAIL_FROM: z.string().default('Questbook <onboarding@resend.dev>'),
 
+  /// Où atterrissent les signalements de contenu. Vide, le signalement est
+  /// tout de même enregistré : c'est la ligne en base qui fait foi, le mail
+  /// n'est que ce qui réveille quelqu'un. Un poste de développement n'a donc
+  /// pas à configurer d'adresse pour que la fonctionnalité marche.
+  REPORTS_EMAIL_TO: z.string().default(''),
+
   FIREBASE_PROJECT_ID: z.string().default(''),
   FIREBASE_CLIENT_EMAIL: z.string().default(''),
   /// Pasted from the service account JSON, where newlines are escaped as \n.
