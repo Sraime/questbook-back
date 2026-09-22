@@ -118,6 +118,8 @@ garde une identité unique sur tous les appareils, sans table de correspondance.
 | `shop_item_ownerships`| Qui a acheté quoi                                                 |
 | `device_tokens`       | Jetons FCM, un par appareil                                       |
 | `notifications`       | Historique consultable dans l'app                                 |
+| `reports`             | Signalements, avec l'instantané du contenu au moment du geste     |
+| `user_blocks`         | Qui a bloqué qui, à sens unique                                   |
 
 Les champs des personnages reproduisent exactement les modèles Freezed de l'app
 (`Character`, `CharacterStat`, `CharacterResource`, `InventoryItem`). Les
@@ -205,16 +207,20 @@ Ce que le code garantit :
 - **Jetons.** Refresh tokens et jetons d'invitation sont stockés **hachés**
   (SHA-256). `.env` est créé avec `umask 077` sur le VPS.
 
-### Les deux pages que les stores exigent
+### Les trois pages que les stores exigent
 
 Ni Play ni l'App Store ne publient une fiche sans URL de politique de
-confidentialité, et Play en réclame une seconde décrivant la suppression du
-compte. Elles sont servies par Caddy, sur le domaine de l'API :
+confidentialité ; Play en réclame une seconde décrivant la suppression du
+compte ; et la directive 1.2 d'Apple, qui s'applique dès qu'une app affiche
+du contenu écrit par ses utilisateurs, en attend une troisième — des
+conditions d'utilisation disant que le contenu choquant n'est pas toléré.
+Elles sont servies par Caddy, sur le domaine de l'API :
 
 | Page | Fichier |
 | --- | --- |
 | <https://questbook.nextuscorp.com/confidentialite> | `web/confidentialite.html` |
 | <https://questbook.nextuscorp.com/suppression-du-compte> | `web/suppression-du-compte.html` |
+| <https://questbook.nextuscorp.com/conditions-utilisation> | `web/conditions-utilisation.html` |
 
 Pas de site à part : le certificat est déjà là, et un second domaine serait
 une échéance de plus à oublier. Le `Caddyfile` les sert depuis `/srv/web`
@@ -228,6 +234,11 @@ l'ancre `x-journaux` de `docker-compose.yml` (10 Mo, trois fichiers, par
 service) qui la rend exacte. Sans elle, le pilote par défaut garderait tout
 tant que le conteneur vit — et Caddy tourne des semaines d'affilée. Modifier
 l'une sans l'autre transforme la page en fausse déclaration.
+
+Les conditions annoncent de leur côté un examen des signalements **sous
+vingt-quatre heures** et la fermeture du compte fautif. C'est un engagement
+tenu à la main, depuis la boîte `REPORTS_EMAIL_TO` : rien dans le code ne
+l'applique, et rien ne préviendra s'il ne l'est pas.
 
 Ce qui reste une affaire d'exploitation, pas de code (voir aussi le VPS) :
 
@@ -251,7 +262,21 @@ d'acceptation d'invitation, servie hors préfixe (voir plus bas).
 | `POST`  | `/auth/logout`   | Révoque le refresh token (204)                  |
 | `GET`   | `/auth/me`       | Profil de l'utilisateur connecté                |
 | `PATCH` | `/auth/me`       | Change le pseudo (`displayName`, 1 à 60 signes) |
+| `POST`  | `/auth/terms`    | Accepte les conditions d'utilisation            |
 | `DELETE`| `/auth/me`       | Efface le compte et tout ce qui en dépend (204) |
+
+`termsAcceptedAt` accompagne le profil **partout** : connexion,
+rafraîchissement et `/auth/me`. C'est là-dessus que l'app barre son premier
+écran, et le lui faire demander à part ajouterait un appel là où il n'en faut
+aucun. Il est nul pour un compte neuf comme pour ceux qui existaient avant la
+publication des conditions — personne ne les a acceptées, et supposer le
+contraire serait signer à leur place.
+
+`POST /auth/terms` est sans corps : il n'y a rien à nuancer dans un
+consentement, et la version acceptée se déduit de la date, seule publiée ce
+jour-là. Il est idempotent **sans réécrire la date** : une app relancée deux
+fois sur un réseau capricieux ne doit pas déplacer le moment où le compte a
+dit oui.
 
 ### Personnages
 
@@ -539,6 +564,78 @@ de paiement ; c'est ce qui les rend achetables aujourd'hui.
 | `PUT`    | `/devices`                  | Enregistrer un jeton FCM (204)             |
 | `DELETE` | `/devices/:token`           | Retirer un jeton, à la déconnexion (204)   |
 
+### Signalements
+
+| Méthode | Route      | Description                        |
+| ------- | ---------- | ---------------------------------- |
+| `POST`  | `/reports` | Signaler un contenu choquant (201) |
+
+Le corps ne dit que **ce qui est visé et ce qu'on lui reproche** :
+`{ contentType, contentId, reason }`, où `contentType` vaut `user`, `table`,
+`session` ou `investigator`. Ni l'auteur du contenu ni sa copie ne viennent de
+l'appelant : le serveur relit la cible lui-même, vérifie que l'appelant
+pouvait la voir, et en prend l'instantané. Un signalement dont on laisserait
+le client décrire la victime se forgerait en une requête.
+
+**L'instantané est la raison d'être de la table.** Le contenu signalé se
+réécrit dans la minute qui suit, et l'on examinerait sinon une version
+repentie plutôt que celle qui a choqué. Il est stocké en JSON dans `snapshot`,
+avec des libellés en français : ils finissent tels quels sous les yeux du
+support.
+
+Ce qu'on voit d'une cible décide de ce qu'on peut signaler : un joueur, s'il
+partage une table ; une table ou une séance, si l'on en est membre ; un
+investigateur, s'il s'est assis à une séance d'une table commune. Hors de là,
+la réponse est `404` et non `403`, comme partout ici. Deux refus utiles s'y
+ajoutent : `400` sur son propre contenu, `409` sur le même contenu deux fois —
+signaler en boucle ne grossit pas le dossier, cela donne un levier de
+harcèlement par le nombre.
+
+Un mail part ensuite vers `REPORTS_EMAIL_TO`, sujet
+`Questbook - nouveau signalement`. **Son échec ne fait pas échouer la
+requête** : la ligne en base est ce qui fait foi, et l'on ne renvoie pas une
+erreur à quelqu'un qui vient de subir quelque chose. Une adresse vide ne
+réveille personne mais enregistre quand même, ce qui permet à un poste de
+développement de tourner sans compte tiers.
+
+### Blocages
+
+| Méthode  | Route     | Description             |
+| -------- | --------- | ----------------------- |
+| `POST`   | `/blocks` | Bloquer quelqu'un (201) |
+
+**Une seule route, et rien pour la défaire.** Ce n'est pas un oubli : ce que
+le geste promet, c'est de ne plus croiser quelqu'un, et une promesse qu'on
+retire d'un bouton n'en est pas une. Il n'y a donc ni liste à relire ni
+déblocage, et un test épingle leur absence — ces routes ont existé, les
+remettre par inadvertance se verrait.
+
+Le blocage est **à sens unique** : il dit ce que *moi* je ne veux plus
+croiser, et n'empêche pas l'autre de continuer sa vie ailleurs. Il est aussi
+**idempotent** — bloquer deux fois est le même blocage, pas une erreur — mais
+ses conséquences se rejouent à chaque appel, parce qu'une table rejointe
+depuis doit se défaire comme les autres.
+
+Car bloquer n'est pas qu'une promesse sur l'avenir, et c'est là tout l'intérêt
+du geste : il défait aussi le présent, dans une transaction. Les invitations
+en attente entre les deux comptes disparaissent **dans les deux sens** ;
+celles adressées à d'autres n'y touchent pas. Puis chaque table commune se
+règle selon mon rôle **à cette table-là** :
+
+- j'y suis joueur → **je la quitte** ;
+- j'en suis le MJ → **c'est l'autre qui en sort**, car partir laisserait une
+  salle que plus personne ne peut animer.
+
+Les deux cas coexistent dans un même appel, et la réponse les compte :
+`{ tablesLeft, playersRemoved }`. L'app s'en sert pour dire ce qui vient de
+se passer plutôt que de le laisser deviner — elle ne connaît qu'une table,
+celle d'où part le geste.
+
+Ensuite, `POST /tables/:id/invitations` refuse d'inviter qui m'a bloqué —
+avec un `403` dont le message **ne dit pas pourquoi** : apprendre qu'on a été
+bloqué est exactement ce que le geste évite, et une invitation sonderait
+sinon tout un carnet d'adresses.
+
 `GET /health` (hors préfixe) vérifie aussi la connexion PostgreSQL.
 
 ### Forme des erreurs
@@ -693,13 +790,16 @@ scripts s'appuient là-dessus :
 ```bash
 npx tsx scripts/seat-a-player.ts                  # les comptes de la base de dev
 npx tsx scripts/seat-a-player.ts questbook.nextus # asseoir celui-ci comme joueur
+npx tsx scripts/seat-a-player.ts questbook.nextus --mj # ou comme MJ
 npx tsx scripts/push-as-gm.ts <sessionId> 4       # 4 pions, au nom du MJ
 npx tsx scripts/push-as-gm.ts <sessionId> 4 grille # et la carte voulue
 ```
 
-`seat-a-player` crée un MJ de contrôle, une table où le compte donné est
-`player`, et une séance **commencée depuis une heure** — de quoi voir
-« Participer » sans attendre. Les inscriptions restent ouvertes une heure
+`seat-a-player` crée un compte de contrôle, une table où les deux sont
+membres, et une séance **commencée depuis une heure** — de quoi voir
+« Participer » sans attendre. `--mj` inverse les rôles : plusieurs gestes ne
+se voient que depuis ce siège-là — retirer un joueur, ou le bloquer, qui le
+sort de la table au lieu de m'en faire sortir. Les inscriptions restent ouvertes une heure
 après la création de la séance, donc on peut encore répondre. Les
 identifiants de carte se lisent dans `board_catalog.dart` de l'app :
 `manoir`, `grille`.
@@ -783,7 +883,13 @@ de vrai :
    ```
    RESEND_API_KEY=re_xxxxxxxx
    EMAIL_FROM=Questbook <invitations@questbook.nextuscorp.com>
+   REPORTS_EMAIL_TO=support@nextuscorp.com
    ```
+
+`REPORTS_EMAIL_TO` est l'adresse que réveille un signalement. Elle est vide
+par défaut, ce qui n'empêche rien d'être enregistré — mais en production,
+laisser ce champ vide voudrait dire qu'un contenu signalé n'atteint personne,
+alors qu'Apple attend qu'il disparaisse sous 24 h.
 
 ### Notifications push (Firebase)
 

@@ -328,6 +328,22 @@ export class TableService {
       if (alreadyMember) {
         throw conflict('This player is already at the table');
       }
+
+      // Bloquer promet de ne plus rien recevoir de quelqu'un, et c'est ici
+      // que la promesse se tient. Le message ne dit pas pourquoi : apprendre
+      // qu'on a été bloqué est précisément ce que le geste évite, et il
+      // suffirait sinon d'une invitation pour sonder tout un carnet
+      // d'adresses.
+      const blocked = await this.prisma.userBlock.findUnique({
+        where: {
+          blockerId_blockedId: { blockerId: invited.id, blockedId: userId },
+        },
+        select: { id: true },
+      });
+
+      if (blocked) {
+        throw forbidden('Cette personne ne peut pas être invitée.');
+      }
     }
 
     const existing = await this.prisma.tableInvitation.findUnique({

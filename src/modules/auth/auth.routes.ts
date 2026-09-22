@@ -54,6 +54,13 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
     async (request) => app.auth.rename(request.user.sub, request.body.displayName),
   );
 
+  /// Accepter les conditions d'utilisation. Sans corps : il n'y a rien à
+  /// nuancer dans un consentement, et la version acceptée se déduit de la
+  /// date — c'est la seule qui était publiée ce jour-là.
+  app.post('/terms', { preHandler: [app.authenticate] }, async (request) =>
+    app.auth.acceptTerms(request.user.sub),
+  );
+
   app.delete('/me', { preHandler: [app.authenticate] }, async (request, reply) => {
     await app.auth.deleteAccount(request.user.sub);
     return reply.code(204).send();

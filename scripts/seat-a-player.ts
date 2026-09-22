@@ -1,19 +1,26 @@
-/// Assoit un compte comme *joueur* d'une table dont le MJ est un compte de
+/// Assoit un compte a une table dont l'autre siege est tenu par un compte de
 /// controle, sur une seance commencee depuis une heure.
 ///
 /// Voir la section « S'asseoir a une table sans second compte Google » du
-/// README : c'est le seul moyen de voir l'ecran d'une seance du cote joueur
-/// sans brancher un second compte Google sur l'emulateur.
+/// README : c'est le seul moyen de voir les deux cotes d'une table sans
+/// brancher un second compte Google sur l'emulateur.
 ///
 ///   npx tsx scripts/seat-a-player.ts                  # les comptes connus
-///   npx tsx scripts/seat-a-player.ts questbook.nextus # asseoir celui-ci
+///   npx tsx scripts/seat-a-player.ts questbook.nextus # joueur d'une table
+///   npx tsx scripts/seat-a-player.ts questbook.nextus --mj  # MJ de la sienne
+///
+/// `--mj` inverse les roles. Plusieurs gestes ne se voient que d'un seul
+/// cote — retirer un joueur, ou le bloquer, qui le sort de la table au lieu
+/// de m'en faire sortir — et ils resteraient invisibles sans lui.
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
 const main = async () => {
-  const needle = process.argv[2];
+  const args = process.argv.slice(2);
+  const iAmGameMaster = args.includes('--mj');
+  const needle = args.find((arg) => !arg.startsWith('--'));
 
   const users = await prisma.user.findMany({
     select: { id: true, email: true, displayName: true },
@@ -33,23 +40,24 @@ const main = async () => {
   if (!me) throw new Error(`Aucun compte ne contient « ${needle} »`);
 
   const stamp = Date.now().toString(36);
-  const gm = await prisma.user.create({
+  const other = await prisma.user.create({
     data: {
-      googleSub: `seat-gm-${stamp}`,
-      email: `mj-${stamp}@local`,
-      displayName: 'Hélène, maîtresse du jeu',
+      googleSub: `seat-other-${stamp}`,
+      email: `${iAmGameMaster ? 'joueuse' : 'mj'}-${stamp}@local`,
+      displayName: iAmGameMaster ? 'Hélène, joueuse' : 'Hélène, maîtresse du jeu',
     },
   });
 
+  const owner = iAmGameMaster ? me : other;
   const table = await prisma.gameTable.create({
     data: {
       title: 'Les Ombres de Providence',
       universeLabel: 'Call of Cthulhu',
-      ownerId: gm.id,
+      ownerId: owner.id,
       members: {
         create: [
-          { userId: gm.id, role: 'gm' },
-          { userId: me.id, role: 'player' },
+          { userId: owner.id, role: 'gm' },
+          { userId: iAmGameMaster ? other.id : me.id, role: 'player' },
         ],
       },
     },
@@ -68,8 +76,8 @@ const main = async () => {
     },
   });
 
-  console.log(`Joueur   ${me.email}`);
-  console.log(`MJ       ${gm.email}`);
+  console.log(`MJ       ${owner.email}`);
+  console.log(`Joueur   ${(iAmGameMaster ? other : me).email}`);
   console.log(`Table    ${table.title}`);
   console.log(`Séance   ${session.id}  (commencée il y a 1 h)`);
   console.log(`\nPousser le plateau :\n  npx tsx scripts/push-as-gm.ts ${session.id} 4`);
