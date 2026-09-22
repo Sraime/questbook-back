@@ -165,6 +165,48 @@ App Flutter                    API Questbook                 Google
   reste dans `/auth/me` et dans la réponse de connexion, destinés au seul
   compte connecté.
 
+### Connexion Apple
+
+`POST /auth/apple` est la même porte, pour le fournisseur qu'Apple impose à
+toute app dont la seule connexion est un service tiers (guideline 4.8 : Google
+Sign-In ne permet pas de masquer son adresse, donc il n'y suffit pas). Le
+client envoie l'`identityToken` obtenu sur l'appareil, l'API en vérifie la
+signature contre le JWKS `https://appleid.apple.com/auth/keys`, puis rend la
+même paire de jetons.
+
+La vérification est écrite à la main dans `apple-verifier.ts`, sur `node:crypto`
+plutôt que sur une bibliothèque JWT : une signature RS256, un émetteur, une
+audience et une expiration, c'est tout ce qu'Apple demande de contrôler.
+Le jeu de clés est gardé une heure en cache, et un `kid` inconnu force un
+nouveau téléchargement — c'est la forme normale d'une rotation, qu'Apple
+n'annonce pas.
+
+Trois différences avec Google, toutes dictées par le jeton :
+
+- **Il ne porte ni nom ni photo.** Apple ne remet le nom qu'une fois, au
+  client, à la première autorisation. C'est donc lui qui le passe dans
+  `displayName`, et on ne lui fait pas plus confiance qu'au renommage : le
+  joueur peut le changer ensuite, c'est tout ce que ce champ vaut.
+- **L'adresse peut manquer**, si le compte a été autorisé sans la partager.
+  Une table s'invite par adresse : la connexion répond alors `400` en le
+  disant, plutôt que de fabriquer une adresse interne.
+- **Rien ne se rafraîchit ensuite.** Les connexions suivantes ne portent que le
+  `sub`, et c'est par lui que le compte se retrouve — jamais par l'email.
+
+`google_sub` et `apple_sub` sont deux colonnes nullables, uniques, et un compte
+n'en porte qu'une. **Il n'y a pas de fusion** : la même personne connectée par
+Apple après l'avoir été par Google obtient un second compte. Le relais privé
+`@privaterelay.appleid.com` rend les deux adresses étrangères l'une à l'autre,
+et rien dans les jetons ne dit qu'il s'agit du même humain. Si l'adresse
+partagée est en revanche celle d'un compte Google existant, la connexion répond
+`409` en nommant la collision, plutôt que de tomber sur la contrainte
+d'unicité.
+
+`APPLE_CLIENT_IDS` peut rester vide, là où `GOOGLE_CLIENT_IDS` est obligatoire :
+une API qui refuserait de démarrer faute de cette variable couperait la
+connexion Google avec. Vide, elle fait répondre `401` à la connexion Apple en
+le disant, et le démarrage l'écrit dans les logs.
+
 ### Supprimer un compte
 
 `DELETE /auth/me` est un `user.delete` sec. Toutes les relations vers `User`
@@ -258,6 +300,7 @@ d'acceptation d'invitation, servie hors préfixe (voir plus bas).
 | Méthode | Route            | Description                                     |
 | ------- | ---------------- | ----------------------------------------------- |
 | `POST`  | `/auth/google`   | Inscription/connexion depuis un ID token Google |
+| `POST`  | `/auth/apple`    | Idem depuis un jeton d'identite Apple           |
 | `POST`  | `/auth/refresh`  | Rotation du couple de jetons                    |
 | `POST`  | `/auth/logout`   | Révoque le refresh token (204)                  |
 | `GET`   | `/auth/me`       | Profil de l'utilisateur connecté                |

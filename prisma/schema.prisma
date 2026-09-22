@@ -14,8 +14,17 @@ datasource db {
 }
 
 model User {
-  id          String   @id @default(uuid())
-  googleSub   String   @unique @map("google_sub")
+  id String @id @default(uuid())
+
+  /// L'identifiant du compte chez son fournisseur de connexion. Un compte en
+  /// porte un seul : Apple ne livre l'adresse qu'a la premiere autorisation,
+  /// et masquee derriere un relais prive la plupart du temps, donc rien ne
+  /// permet de reconnaitre le meme humain d'un fournisseur a l'autre. Les deux
+  /// colonnes sont nullables pour cette raison, et l'API refuse de creer un
+  /// compte qui n'en renseignerait aucune.
+  googleSub String? @unique @map("google_sub")
+  appleSub  String? @unique @map("apple_sub")
+
   email       String   @unique
   displayName String?  @map("display_name")
   pictureUrl  String?  @map("picture_url")
