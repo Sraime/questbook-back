@@ -98,6 +98,7 @@ export async function createTestApp(): Promise<TestContext> {
     LOG_LEVEL: 'silent',
     // The suite fires far more requests per minute than a real client would.
     RATE_LIMIT_MAX: '100000',
+    REPORTS_EMAIL_TO: 'support@example.com',
   } as NodeJS.ProcessEnv);
 
   const app = await buildApp({
@@ -117,7 +118,7 @@ export async function createTestApp(): Promise<TestContext> {
 /// model ever stops cascading from a user.
 export async function resetDatabase(): Promise<void> {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE users, characters, character_stats, character_resources, inventory_items, refresh_tokens, game_tables, table_members, table_invitations, game_sessions, session_attendances, session_npcs, session_boards, device_tokens, notifications, scenarios, scenario_annexes, scenario_ownerships, shop_items, shop_item_ownerships RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE users, characters, character_stats, character_resources, inventory_items, refresh_tokens, game_tables, table_members, table_invitations, game_sessions, session_attendances, session_npcs, session_boards, device_tokens, notifications, scenarios, scenario_annexes, scenario_ownerships, shop_items, shop_item_ownerships, reports RESTART IDENTITY CASCADE',
   );
 }
 

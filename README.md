@@ -118,6 +118,7 @@ garde une identité unique sur tous les appareils, sans table de correspondance.
 | `shop_item_ownerships`| Qui a acheté quoi                                                 |
 | `device_tokens`       | Jetons FCM, un par appareil                                       |
 | `notifications`       | Historique consultable dans l'app                                 |
+| `reports`             | Signalements, avec l'instantané du contenu au moment du geste     |
 
 Les champs des personnages reproduisent exactement les modèles Freezed de l'app
 (`Character`, `CharacterStat`, `CharacterResource`, `InventoryItem`). Les
@@ -539,6 +540,40 @@ de paiement ; c'est ce qui les rend achetables aujourd'hui.
 | `PUT`    | `/devices`                  | Enregistrer un jeton FCM (204)             |
 | `DELETE` | `/devices/:token`           | Retirer un jeton, à la déconnexion (204)   |
 
+### Signalements
+
+| Méthode | Route      | Description                        |
+| ------- | ---------- | ---------------------------------- |
+| `POST`  | `/reports` | Signaler un contenu choquant (201) |
+
+Le corps ne dit que **ce qui est visé et ce qu'on lui reproche** :
+`{ contentType, contentId, reason }`, où `contentType` vaut `user`, `table`,
+`session` ou `investigator`. Ni l'auteur du contenu ni sa copie ne viennent de
+l'appelant : le serveur relit la cible lui-même, vérifie que l'appelant
+pouvait la voir, et en prend l'instantané. Un signalement dont on laisserait
+le client décrire la victime se forgerait en une requête.
+
+**L'instantané est la raison d'être de la table.** Le contenu signalé se
+réécrit dans la minute qui suit, et l'on examinerait sinon une version
+repentie plutôt que celle qui a choqué. Il est stocké en JSON dans `snapshot`,
+avec des libellés en français : ils finissent tels quels sous les yeux du
+support.
+
+Ce qu'on voit d'une cible décide de ce qu'on peut signaler : un joueur, s'il
+partage une table ; une table ou une séance, si l'on en est membre ; un
+investigateur, s'il s'est assis à une séance d'une table commune. Hors de là,
+la réponse est `404` et non `403`, comme partout ici. Deux refus utiles s'y
+ajoutent : `400` sur son propre contenu, `409` sur le même contenu deux fois —
+signaler en boucle ne grossit pas le dossier, cela donne un levier de
+harcèlement par le nombre.
+
+Un mail part ensuite vers `REPORTS_EMAIL_TO`, sujet
+`Questbook - nouveau signalement`. **Son échec ne fait pas échouer la
+requête** : la ligne en base est ce qui fait foi, et l'on ne renvoie pas une
+erreur à quelqu'un qui vient de subir quelque chose. Une adresse vide ne
+réveille personne mais enregistre quand même, ce qui permet à un poste de
+développement de tourner sans compte tiers.
+
 `GET /health` (hors préfixe) vérifie aussi la connexion PostgreSQL.
 
 ### Forme des erreurs
@@ -783,7 +818,13 @@ de vrai :
    ```
    RESEND_API_KEY=re_xxxxxxxx
    EMAIL_FROM=Questbook <invitations@questbook.nextuscorp.com>
+   REPORTS_EMAIL_TO=support@nextuscorp.com
    ```
+
+`REPORTS_EMAIL_TO` est l'adresse que réveille un signalement. Elle est vide
+par défaut, ce qui n'empêche rien d'être enregistré — mais en production,
+laisser ce champ vide voudrait dire qu'un contenu signalé n'atteint personne,
+alors qu'Apple attend qu'il disparaisse sous 24 h.
 
 ### Notifications push (Firebase)
 

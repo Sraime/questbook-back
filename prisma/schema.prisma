@@ -35,6 +35,8 @@ model User {
   notifications       Notification[]
   scenarioOwnerships  ScenarioOwnership[]
   shopItemOwnerships  ShopItemOwnership[]
+  reportsFiled        Report[]            @relation("ReportAuthor")
+  reportsAbout        Report[]            @relation("ReportedUser")
 
   @@map("users")
 }
@@ -439,4 +441,42 @@ model Notification {
 
   @@index([userId, createdAt])
   @@map("notifications")
+}
+
+/// Un contenu signalé comme choquant. Apple exige d'une app à contenu généré
+/// qu'on puisse signaler et agir sous 24 h ; le mail part vers le support,
+/// mais sans trace en base il n'y aurait rien à rouvrir le lendemain.
+///
+/// `snapshot` n'est pas une redondance du contenu : son auteur peut le
+/// réécrire dans la minute, et l'on examinerait alors une version repentie
+/// plutôt que celle qui a choqué. La copie est faite par le serveur, jamais
+/// envoyée par le client — un signalement dont on laisserait l'appelant
+/// décrire la cible se forge en une requête.
+///
+/// Les deux relations cascadent : un compte effacé emporte les signalements
+/// qu'il a déposés comme ceux qui le visaient. C'est le droit à l'effacement
+/// qui l'impose, et le mail parti vers le support garde la mémoire du reste.
+model Report {
+  id             String   @id @default(uuid())
+  reporterId     String   @map("reporter_id")
+  reportedUserId String   @map("reported_user_id")
+  /// `user`, `table`, `session` ou `investigator` — du texte, comme les
+  /// autres énumérations ici, la validation restant côté Zod.
+  contentType    String   @map("content_type")
+  contentId      String   @map("content_id")
+  /// Ce que le contenu disait au moment du signalement, en JSON.
+  snapshot       String   @db.Text
+  /// Ce que l'auteur du signalement lui reproche, dans ses mots.
+  reason         String   @db.Text
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  reporter     User @relation("ReportAuthor", fields: [reporterId], references: [id], onDelete: Cascade)
+  reportedUser User @relation("ReportedUser", fields: [reportedUserId], references: [id], onDelete: Cascade)
+
+  /// Signaler deux fois la même chose n'ajoute rien au dossier et donne un
+  /// levier de harcèlement par le nombre.
+  @@unique([reporterId, contentType, contentId])
+  @@index([createdAt])
+  @@index([reportedUserId])
+  @@map("reports")
 }
