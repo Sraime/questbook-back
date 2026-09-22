@@ -765,13 +765,16 @@ scripts s'appuient là-dessus :
 ```bash
 npx tsx scripts/seat-a-player.ts                  # les comptes de la base de dev
 npx tsx scripts/seat-a-player.ts questbook.nextus # asseoir celui-ci comme joueur
+npx tsx scripts/seat-a-player.ts questbook.nextus --mj # ou comme MJ
 npx tsx scripts/push-as-gm.ts <sessionId> 4       # 4 pions, au nom du MJ
 npx tsx scripts/push-as-gm.ts <sessionId> 4 grille # et la carte voulue
 ```
 
-`seat-a-player` crée un MJ de contrôle, une table où le compte donné est
-`player`, et une séance **commencée depuis une heure** — de quoi voir
-« Participer » sans attendre. Les inscriptions restent ouvertes une heure
+`seat-a-player` crée un compte de contrôle, une table où les deux sont
+membres, et une séance **commencée depuis une heure** — de quoi voir
+« Participer » sans attendre. `--mj` inverse les rôles : plusieurs gestes ne
+se voient que depuis ce siège-là — retirer un joueur, ou le bloquer, qui le
+sort de la table au lieu de m'en faire sortir. Les inscriptions restent ouvertes une heure
 après la création de la séance, donc on peut encore répondre. Les
 identifiants de carte se lisent dans `board_catalog.dart` de l'app :
 `manoir`, `grille`.
