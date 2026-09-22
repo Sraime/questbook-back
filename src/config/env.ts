@@ -25,6 +25,16 @@ const envSchema = z.object({
   /// (web/server client, Android client, iOS client). Comma-separated.
   GOOGLE_CLIENT_IDS: z.string().transform(csv).pipe(z.array(z.string()).min(1)),
 
+  /// Toute audience qu'un jeton d'identite Apple peut porter : le bundle id
+  /// iOS, plus un Services ID si un jour un flux web s'y ajoute.
+  ///
+  /// Vide est tolere, la ou `GOOGLE_CLIENT_IDS` est obligatoire : une API qui
+  /// refuserait de demarrer parce que cette variable manque encore sur le VPS
+  /// couperait la connexion Google avec. La connexion Apple, elle, repond
+  /// alors 401 en le disant, et le demarrage le previent — voir
+  /// `plugins/auth.ts`.
+  APPLE_CLIENT_IDS: z.string().default('').transform(csv),
+
   /// Empty means "no browser origin allowed", which is the right default for a
   /// mobile-only API: native apps do not send an Origin header.
   CORS_ORIGINS: z.string().default('').transform(csv),

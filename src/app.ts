@@ -25,6 +25,7 @@ import tableRoutes from './modules/tables/table.routes.js';
 import scenarioRoutes from './modules/scenarios/scenario.routes.js';
 import shopRoutes from './modules/shop/shop.routes.js';
 import reportRoutes, { blockRoutes } from './modules/moderation/report.routes.js';
+import type { AppleVerifier } from './modules/auth/apple-verifier.js';
 import type { GoogleVerifier } from './modules/auth/google-verifier.js';
 import type { EmailSender } from './lib/email-sender.js';
 import type { PushSender } from './lib/push-sender.js';
@@ -35,6 +36,7 @@ export interface BuildAppOptions {
   /// would otherwise reach the network.
   prismaClient?: PrismaClient;
   googleVerifier?: GoogleVerifier;
+  appleVerifier?: AppleVerifier;
   emailSender?: EmailSender;
   pushSender?: PushSender;
 }
@@ -56,12 +58,13 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
           };
         },
       },
-      // The Google ID token, our own tokens and any email in a body must
-      // never reach the log files.
+      // The Google ID token, the Apple identity token, our own tokens and any
+      // email in a body must never reach the log files.
       redact: {
         paths: [
           'req.headers.authorization',
           'req.body.idToken',
+          'req.body.identityToken',
           'req.body.refreshToken',
           'req.body.email',
           // An invitation token grants table membership to whoever holds it.
@@ -175,7 +178,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     accessTokenTtl: env.ACCESS_TOKEN_TTL,
     refreshTokenTtlDays: env.REFRESH_TOKEN_TTL_DAYS,
     googleClientIds: env.GOOGLE_CLIENT_IDS,
+    appleClientIds: env.APPLE_CLIENT_IDS,
     googleVerifier: options.googleVerifier,
+    appleVerifier: options.appleVerifier,
   });
 
   // Avant les routes : c'est lui qui apprend a Fastify a repondre a une

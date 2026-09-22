@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { PrismaClient, User } from '@prisma/client';
-import { unauthorized } from '../../lib/errors.js';
+import { badRequest, conflict, unauthorized } from '../../lib/errors.js';
+import type { AppleVerifier } from './apple-verifier.js';
 import type { GoogleVerifier } from './google-verifier.js';
 import { grantStarterScenarios } from '../scenarios/scenario.service.js';
 
@@ -34,6 +35,7 @@ export type AccessTokenSigner = (payload: { sub: string }) => string;
 export interface AuthServiceOptions {
   prisma: PrismaClient;
   google: GoogleVerifier;
+  apple: AppleVerifier;
   signAccessToken: AccessTokenSigner;
   accessTokenTtl: string;
   refreshTokenTtlDays: number;
@@ -80,6 +82,70 @@ export class AuthService {
         locale: identity.locale,
       },
     });
+
+    await this.claimInvitations(user.id, user.email);
+    await grantStarterScenarios(this.options.prisma, user.id);
+
+    const tokens = await this.issueTokens(user);
+    return { ...tokens, user: toPublicUser(user) };
+  }
+
+  /// Même porte que `signInWithGoogle`, pour le fournisseur qu'Apple impose à
+  /// toute app dont la seule connexion est un service tiers.
+  ///
+  /// Trois différences avec Google, et elles viennent toutes du jeton :
+  ///
+  /// - **Il ne porte ni nom ni photo.** Apple ne remet le nom qu'une fois, au
+  ///   client, à la toute première autorisation. C'est donc lui qui le passe
+  ///   ici, et on ne lui fait pas plus confiance qu'au renommage : le joueur
+  ///   peut le changer ensuite, et c'est tout ce que ce champ vaut.
+  /// - **L'adresse peut manquer**, si le compte a été autorisé sans la
+  ///   partager. Une table s'invite par adresse : sans elle, il n'y a pas de
+  ///   compte à créer, et le dire vaut mieux qu'inventer une adresse interne.
+  /// - **Rien ne se rafraîchit aux connexions suivantes.** L'adresse d'un
+  ///   relais privé est stable, et c'est la seule chose qu'Apple redonne.
+  async signInWithApple(identityToken: string, displayName?: string): Promise<AuthResult> {
+    const identity = await this.options.apple.verify(identityToken);
+
+    const existing = await this.options.prisma.user.findUnique({
+      where: { appleSub: identity.sub },
+    });
+
+    if (existing) {
+      const tokens = await this.issueTokens(existing);
+      return { ...tokens, user: toPublicUser(existing) };
+    }
+
+    if (!identity.email) {
+      throw badRequest(
+        'Apple account shared no email address, which Questbook needs to invite you to a table',
+      );
+    }
+    if (!identity.emailVerified) {
+      throw unauthorized('Apple account email is not verified');
+    }
+
+    const email = identity.email.trim().toLowerCase();
+    const trimmedName = displayName?.trim();
+
+    const user = await this.options.prisma.user
+      .create({
+        data: {
+          appleSub: identity.sub,
+          email,
+          displayName: trimmedName && trimmedName.length > 0 ? trimmedName : null,
+        },
+      })
+      .catch((cause: unknown) => {
+        // Cette adresse a déjà un compte, créé par une connexion Google. Les
+        // rapprocher demanderait de prouver que c'est le même humain, ce
+        // qu'aucun des deux jetons ne dit ; le refus nommé laisse au moins le
+        // joueur revenir par la porte qu'il connaît.
+        if ((cause as { code?: string }).code === 'P2002') {
+          throw conflict('This email already signs in to Questbook with Google');
+        }
+        throw cause;
+      });
 
     await this.claimInvitations(user.id, user.email);
     await grantStarterScenarios(this.options.prisma, user.id);
