@@ -23,6 +23,13 @@ model User {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
+  /// Quand ce compte a accepté les conditions d'utilisation. Nul tant qu'il
+  /// ne l'a pas fait, y compris pour les comptes anterieurs a leur
+  /// publication : c'est cette absence que l'app lit pour barrer l'écran.
+  /// Une date plutôt qu'un booléen, pour pouvoir redemander à la révision
+  /// suivante sans deviner qui avait vu quoi.
+  termsAcceptedAt DateTime? @map("terms_accepted_at")
+
   characters    Character[]
   refreshTokens RefreshToken[]
 

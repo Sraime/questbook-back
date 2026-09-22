@@ -207,16 +207,20 @@ Ce que le code garantit :
 - **Jetons.** Refresh tokens et jetons d'invitation sont stockés **hachés**
   (SHA-256). `.env` est créé avec `umask 077` sur le VPS.
 
-### Les deux pages que les stores exigent
+### Les trois pages que les stores exigent
 
 Ni Play ni l'App Store ne publient une fiche sans URL de politique de
-confidentialité, et Play en réclame une seconde décrivant la suppression du
-compte. Elles sont servies par Caddy, sur le domaine de l'API :
+confidentialité ; Play en réclame une seconde décrivant la suppression du
+compte ; et la directive 1.2 d'Apple, qui s'applique dès qu'une app affiche
+du contenu écrit par ses utilisateurs, en attend une troisième — des
+conditions d'utilisation disant que le contenu choquant n'est pas toléré.
+Elles sont servies par Caddy, sur le domaine de l'API :
 
 | Page | Fichier |
 | --- | --- |
 | <https://questbook.nextuscorp.com/confidentialite> | `web/confidentialite.html` |
 | <https://questbook.nextuscorp.com/suppression-du-compte> | `web/suppression-du-compte.html` |
+| <https://questbook.nextuscorp.com/conditions-utilisation> | `web/conditions-utilisation.html` |
 
 Pas de site à part : le certificat est déjà là, et un second domaine serait
 une échéance de plus à oublier. Le `Caddyfile` les sert depuis `/srv/web`
@@ -230,6 +234,11 @@ l'ancre `x-journaux` de `docker-compose.yml` (10 Mo, trois fichiers, par
 service) qui la rend exacte. Sans elle, le pilote par défaut garderait tout
 tant que le conteneur vit — et Caddy tourne des semaines d'affilée. Modifier
 l'une sans l'autre transforme la page en fausse déclaration.
+
+Les conditions annoncent de leur côté un examen des signalements **sous
+vingt-quatre heures** et la fermeture du compte fautif. C'est un engagement
+tenu à la main, depuis la boîte `REPORTS_EMAIL_TO` : rien dans le code ne
+l'applique, et rien ne préviendra s'il ne l'est pas.
 
 Ce qui reste une affaire d'exploitation, pas de code (voir aussi le VPS) :
 
@@ -253,7 +262,21 @@ d'acceptation d'invitation, servie hors préfixe (voir plus bas).
 | `POST`  | `/auth/logout`   | Révoque le refresh token (204)                  |
 | `GET`   | `/auth/me`       | Profil de l'utilisateur connecté                |
 | `PATCH` | `/auth/me`       | Change le pseudo (`displayName`, 1 à 60 signes) |
+| `POST`  | `/auth/terms`    | Accepte les conditions d'utilisation            |
 | `DELETE`| `/auth/me`       | Efface le compte et tout ce qui en dépend (204) |
+
+`termsAcceptedAt` accompagne le profil **partout** : connexion,
+rafraîchissement et `/auth/me`. C'est là-dessus que l'app barre son premier
+écran, et le lui faire demander à part ajouterait un appel là où il n'en faut
+aucun. Il est nul pour un compte neuf comme pour ceux qui existaient avant la
+publication des conditions — personne ne les a acceptées, et supposer le
+contraire serait signer à leur place.
+
+`POST /auth/terms` est sans corps : il n'y a rien à nuancer dans un
+consentement, et la version acceptée se déduit de la date, seule publiée ce
+jour-là. Il est idempotent **sans réécrire la date** : une app relancée deux
+fois sur un réseau capricieux ne doit pas déplacer le moment où le compte a
+dit oui.
 
 ### Personnages
 

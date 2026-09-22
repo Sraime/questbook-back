@@ -19,6 +19,12 @@ export interface PublicUser {
   email: string;
   displayName: string | null;
   pictureUrl: string | null;
+
+  /// Nul tant que le compte n'a pas accepté les conditions d'utilisation.
+  /// Voyage avec chaque réponse d'authentification — connexion, rafraîchisse-
+  /// ment, `/me` — parce que l'app barre l'écran là-dessus : le lui faire
+  /// demander à part ajouterait un appel là où il n'en faut aucun.
+  termsAcceptedAt: string | null;
 }
 
 /// Signs a short-lived access token. Injected rather than imported so the
@@ -43,6 +49,7 @@ export const toPublicUser = (user: User): PublicUser => ({
   email: user.email,
   displayName: user.displayName,
   pictureUrl: user.pictureUrl,
+  termsAcceptedAt: user.termsAcceptedAt?.toISOString() ?? null,
 });
 
 export class AuthService {
@@ -147,6 +154,29 @@ export class AuthService {
       throw unauthorized('Account no longer exists');
     }
     return toPublicUser(user);
+  }
+
+  /// Enregistre l'acceptation des conditions d'utilisation.
+  ///
+  /// Idempotent, mais **sans réécrire la date** : ce qui compte est le moment
+  /// où le compte a dit oui, et un second appel — l'app relancée deux fois
+  /// sur un réseau capricieux — ne doit pas le déplacer.
+  async acceptTerms(userId: string): Promise<PublicUser> {
+    const user = await this.options.prisma.user
+      .findUnique({ where: { id: userId } })
+      .catch(() => null);
+
+    if (!user) {
+      throw unauthorized('Account no longer exists');
+    }
+    if (user.termsAcceptedAt) return toPublicUser(user);
+
+    return toPublicUser(
+      await this.options.prisma.user.update({
+        where: { id: userId },
+        data: { termsAcceptedAt: new Date() },
+      }),
+    );
   }
 
   /// Invitations sent to a mailbox before it had an account become visible
