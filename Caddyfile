@@ -18,10 +18,12 @@
 	}
 
 	# Les stores refusent de publier une fiche sans politique de
-	# confidentialité, et Play en veut une seconde pour la suppression du
-	# compte. Elles vivent ici plutôt que sur un site à part : le certificat
-	# est déjà là, et un second domaine serait une échéance de plus à oublier.
-	@pages path /confidentialite /suppression-du-compte /style.css
+	# confidentialité, Play en veut une seconde pour la suppression du
+	# compte, et la directive 1.2 d'Apple en attend une troisième pour les
+	# conditions d'utilisation. Elles vivent ici plutôt que sur un site à
+	# part : le certificat est déjà là, et un second domaine serait une
+	# échéance de plus à oublier.
+	@pages path /confidentialite /suppression-du-compte /conditions-utilisation /style.css
 	handle @pages {
 		root * /srv/web
 		try_files {path}.html {path}
