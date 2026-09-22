@@ -600,11 +600,15 @@ développement de tourner sans compte tiers.
 
 ### Blocages
 
-| Méthode  | Route            | Description                             |
-| -------- | ---------------- | --------------------------------------- |
-| `GET`    | `/blocks`        | Qui j'ai bloqué                         |
-| `POST`   | `/blocks`        | Bloquer quelqu'un (201)                 |
-| `DELETE` | `/blocks/:userId`| Le débloquer (204)                      |
+| Méthode  | Route     | Description             |
+| -------- | --------- | ----------------------- |
+| `POST`   | `/blocks` | Bloquer quelqu'un (201) |
+
+**Une seule route, et rien pour la défaire.** Ce n'est pas un oubli : ce que
+le geste promet, c'est de ne plus croiser quelqu'un, et une promesse qu'on
+retire d'un bouton n'en est pas une. Il n'y a donc ni liste à relire ni
+déblocage, et un test épingle leur absence — ces routes ont existé, les
+remettre par inadvertance se verrait.
 
 Le blocage est **à sens unique** : il dit ce que *moi* je ne veux plus
 croiser, et n'empêche pas l'autre de continuer sa vie ailleurs. Il est aussi
@@ -623,16 +627,14 @@ règle selon mon rôle **à cette table-là** :
   salle que plus personne ne peut animer.
 
 Les deux cas coexistent dans un même appel, et la réponse les compte :
-`{ block, tablesLeft, playersRemoved }`. L'app s'en sert pour dire ce qui
-vient de se passer plutôt que de le laisser deviner.
+`{ tablesLeft, playersRemoved }`. L'app s'en sert pour dire ce qui vient de
+se passer plutôt que de le laisser deviner — elle ne connaît qu'une table,
+celle d'où part le geste.
 
 Ensuite, `POST /tables/:id/invitations` refuse d'inviter qui m'a bloqué —
 avec un `403` dont le message **ne dit pas pourquoi** : apprendre qu'on a été
 bloqué est exactement ce que le geste évite, et une invitation sonderait
 sinon tout un carnet d'adresses.
-
-Débloquer ne rend rien : les tables quittées le restent, et il faudra une
-nouvelle invitation.
 
 `GET /health` (hors préfixe) vérifie aussi la connexion PostgreSQL.
 

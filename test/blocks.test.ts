@@ -28,13 +28,6 @@ const block = (as: SignedInUser, userId: string) =>
     payload: { userId },
   });
 
-const listBlocks = (as: SignedInUser) =>
-  context.app.inject({
-    method: 'GET',
-    url: '/api/v1/blocks',
-    headers: as.authHeader,
-  });
-
 const members = (tableId: string) =>
   prisma.tableMember.findMany({ where: { tableId }, select: { userId: true } });
 
@@ -196,47 +189,37 @@ describe('POST /api/v1/blocks', () => {
   });
 });
 
-describe('GET et DELETE /api/v1/blocks', () => {
-  it('lists who is blocked, and lets them back', async () => {
+describe('il n’y a pas de retour en arrière', () => {
+  it('ne laisse ni relire la liste ni défaire un blocage', async () => {
     const me = await signIn(context, 'me');
     const other = await signIn(context, 'other');
-    await prisma.user.update({
-      where: { id: other.userId },
-      data: { displayName: 'Hélène' },
-    });
-
     await block(me, other.userId);
 
-    const listed = await listBlocks(me);
-    expect(listed.json().blocks).toHaveLength(1);
-    expect(listed.json().blocks[0]).toMatchObject({
-      userId: other.userId,
-      displayName: 'Hélène',
+    // Ce n'est pas un oubli, c'est la decision : ce que le geste promet,
+    // c'est de ne plus croiser quelqu'un, et une promesse qu'on retire d'un
+    // bouton n'en est pas une. Ces routes ont existe, et les remettre sans
+    // le vouloir se verrait ici.
+    const listed = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/blocks',
+      headers: me.authHeader,
     });
-
-    const removed = await context.app.inject({
+    const undone = await context.app.inject({
       method: 'DELETE',
       url: `/api/v1/blocks/${other.userId}`,
       headers: me.authHeader,
     });
 
-    expect(removed.statusCode).toBe(204);
-    expect((await listBlocks(me)).json().blocks).toEqual([]);
-  });
-
-  it('shows nothing to the one who was blocked', async () => {
-    const me = await signIn(context, 'me');
-    const other = await signIn(context, 'other');
-
-    await block(me, other.userId);
-
-    expect((await listBlocks(other)).json().blocks).toEqual([]);
+    expect(listed.statusCode).toBe(404);
+    expect(undone.statusCode).toBe(404);
+    expect(await prisma.userBlock.count()).toBe(1);
   });
 
   it('turns an anonymous caller away', async () => {
     const response = await context.app.inject({
-      method: 'GET',
+      method: 'POST',
       url: '/api/v1/blocks',
+      payload: { userId: '00000000-0000-4000-8000-000000000000' },
     });
 
     expect(response.statusCode).toBe(401);
