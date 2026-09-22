@@ -119,6 +119,7 @@ garde une identité unique sur tous les appareils, sans table de correspondance.
 | `device_tokens`       | Jetons FCM, un par appareil                                       |
 | `notifications`       | Historique consultable dans l'app                                 |
 | `reports`             | Signalements, avec l'instantané du contenu au moment du geste     |
+| `user_blocks`         | Qui a bloqué qui, à sens unique                                   |
 
 Les champs des personnages reproduisent exactement les modèles Freezed de l'app
 (`Character`, `CharacterStat`, `CharacterResource`, `InventoryItem`). Les
@@ -573,6 +574,42 @@ requête** : la ligne en base est ce qui fait foi, et l'on ne renvoie pas une
 erreur à quelqu'un qui vient de subir quelque chose. Une adresse vide ne
 réveille personne mais enregistre quand même, ce qui permet à un poste de
 développement de tourner sans compte tiers.
+
+### Blocages
+
+| Méthode  | Route            | Description                             |
+| -------- | ---------------- | --------------------------------------- |
+| `GET`    | `/blocks`        | Qui j'ai bloqué                         |
+| `POST`   | `/blocks`        | Bloquer quelqu'un (201)                 |
+| `DELETE` | `/blocks/:userId`| Le débloquer (204)                      |
+
+Le blocage est **à sens unique** : il dit ce que *moi* je ne veux plus
+croiser, et n'empêche pas l'autre de continuer sa vie ailleurs. Il est aussi
+**idempotent** — bloquer deux fois est le même blocage, pas une erreur — mais
+ses conséquences se rejouent à chaque appel, parce qu'une table rejointe
+depuis doit se défaire comme les autres.
+
+Car bloquer n'est pas qu'une promesse sur l'avenir, et c'est là tout l'intérêt
+du geste : il défait aussi le présent, dans une transaction. Les invitations
+en attente entre les deux comptes disparaissent **dans les deux sens** ;
+celles adressées à d'autres n'y touchent pas. Puis chaque table commune se
+règle selon mon rôle **à cette table-là** :
+
+- j'y suis joueur → **je la quitte** ;
+- j'en suis le MJ → **c'est l'autre qui en sort**, car partir laisserait une
+  salle que plus personne ne peut animer.
+
+Les deux cas coexistent dans un même appel, et la réponse les compte :
+`{ block, tablesLeft, playersRemoved }`. L'app s'en sert pour dire ce qui
+vient de se passer plutôt que de le laisser deviner.
+
+Ensuite, `POST /tables/:id/invitations` refuse d'inviter qui m'a bloqué —
+avec un `403` dont le message **ne dit pas pourquoi** : apprendre qu'on a été
+bloqué est exactement ce que le geste évite, et une invitation sonderait
+sinon tout un carnet d'adresses.
+
+Débloquer ne rend rien : les tables quittées le restent, et il faudra une
+nouvelle invitation.
 
 `GET /health` (hors préfixe) vérifie aussi la connexion PostgreSQL.
 

@@ -24,7 +24,7 @@ import sessionRoutes from './modules/tables/session.routes.js';
 import tableRoutes from './modules/tables/table.routes.js';
 import scenarioRoutes from './modules/scenarios/scenario.routes.js';
 import shopRoutes from './modules/shop/shop.routes.js';
-import reportRoutes from './modules/moderation/report.routes.js';
+import reportRoutes, { blockRoutes } from './modules/moderation/report.routes.js';
 import type { GoogleVerifier } from './modules/auth/google-verifier.js';
 import type { EmailSender } from './lib/email-sender.js';
 import type { PushSender } from './lib/push-sender.js';
@@ -219,6 +219,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     reportsEmailTo: env.REPORTS_EMAIL_TO,
     prefix: '/api/v1/reports',
   });
+  await app.register(blockRoutes, { prefix: '/api/v1/blocks' });
 
   // Outside /api/v1 and unauthenticated: this is the link people click in
   // their mail client, and it renders HTML rather than JSON.

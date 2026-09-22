@@ -37,6 +37,8 @@ model User {
   shopItemOwnerships  ShopItemOwnership[]
   reportsFiled        Report[]            @relation("ReportAuthor")
   reportsAbout        Report[]            @relation("ReportedUser")
+  blocksMade          UserBlock[]         @relation("BlockAuthor")
+  blocksAgainst       UserBlock[]         @relation("BlockedUser")
 
   @@map("users")
 }
@@ -479,4 +481,27 @@ model Report {
   @@index([createdAt])
   @@index([reportedUserId])
   @@map("reports")
+}
+
+/// Quelqu'un dont on ne veut plus. Le blocage est à sens unique et ne se dit
+/// pas : le bloqué n'en est pas averti, sans quoi bloquer deviendrait un
+/// message de plus à envoyer.
+///
+/// Il ne suffit pas d'empêcher les invitations à venir : bloquer défait aussi
+/// ce qui existe, en séparant les deux comptes des tables qu'ils partagent.
+/// C'est ce que le geste promet, et c'est fait dans la transaction du blocage
+/// plutôt que vérifié à la lecture — une règle qu'on rejoue à chaque requête
+/// finit toujours par être oubliée quelque part.
+model UserBlock {
+  id        String   @id @default(uuid())
+  blockerId String   @map("blocker_id")
+  blockedId String   @map("blocked_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  blocker User @relation("BlockAuthor", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("BlockedUser", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@index([blockedId])
+  @@map("user_blocks")
 }
