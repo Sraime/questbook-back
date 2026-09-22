@@ -23,6 +23,23 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
     async (request) => app.auth.signInWithGoogle(request.body.idToken),
   );
 
+  /// Le pendant Apple, exige par la guideline 4.8 des lors que la seule
+  /// connexion d'une app est un service tiers. Le nom voyage dans le corps
+  /// parce qu'Apple ne le met pas dans le jeton : voir `signInWithApple`.
+  app.post(
+    '/apple',
+    {
+      schema: {
+        body: z.object({
+          identityToken: z.string().min(1),
+          displayName: z.string().trim().max(60).optional(),
+        }),
+      },
+    },
+    async (request) =>
+      app.auth.signInWithApple(request.body.identityToken, request.body.displayName),
+  );
+
   app.post(
     '/refresh',
     { schema: { body: refreshTokenBody } },

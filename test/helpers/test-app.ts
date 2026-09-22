@@ -10,6 +10,10 @@ import type {
   PushSender,
 } from '../../src/lib/push-sender.js';
 import type {
+  AppleIdentity,
+  AppleVerifier,
+} from '../../src/modules/auth/apple-verifier.js';
+import type {
   GoogleIdentity,
   GoogleVerifier,
 } from '../../src/modules/auth/google-verifier.js';
@@ -51,6 +55,33 @@ export class FakeGoogleVerifier implements GoogleVerifier {
   }
 }
 
+/// Le pendant Apple, avec la meme convention : le « jeton » est une cle dans
+/// une table d'identites que le test a remplie. Par defaut l'adresse est
+/// partagee et verifiee, le cas courant ; `email: null` joue le compte
+/// autorise sans adresse.
+export class FakeAppleVerifier implements AppleVerifier {
+  private readonly identities = new Map<string, AppleIdentity>();
+
+  register(
+    identityToken: string,
+    identity: Partial<AppleIdentity> & { sub: string },
+  ): void {
+    this.identities.set(identityToken, {
+      email: `${identity.sub}@privaterelay.appleid.com`,
+      emailVerified: true,
+      ...identity,
+    });
+  }
+
+  async verify(identityToken: string): Promise<AppleIdentity> {
+    const identity = this.identities.get(identityToken);
+    if (!identity) {
+      throw unauthorized('Invalid Apple identity token');
+    }
+    return identity;
+  }
+}
+
 /// Records what would have been sent so a test can assert on the recipient and
 /// pull the invitation link out of the body.
 export class FakeEmailSender implements EmailSender {
@@ -81,12 +112,14 @@ export class FakePushSender implements PushSender {
 export interface TestContext {
   app: FastifyInstance;
   google: FakeGoogleVerifier;
+  apple: FakeAppleVerifier;
   email: FakeEmailSender;
   push: FakePushSender;
 }
 
 export async function createTestApp(): Promise<TestContext> {
   const google = new FakeGoogleVerifier();
+  const apple = new FakeAppleVerifier();
   const email = new FakeEmailSender();
   const push = new FakePushSender();
 
@@ -95,6 +128,7 @@ export async function createTestApp(): Promise<TestContext> {
     DATABASE_URL: databaseUrl,
     JWT_SECRET: 'test-jwt-secret-long-enough-for-hs256-signing',
     GOOGLE_CLIENT_IDS: 'test-client-id.apps.googleusercontent.com',
+    APPLE_CLIENT_IDS: 'com.questbook.questbook',
     LOG_LEVEL: 'silent',
     // The suite fires far more requests per minute than a real client would.
     RATE_LIMIT_MAX: '100000',
@@ -105,12 +139,13 @@ export async function createTestApp(): Promise<TestContext> {
     env,
     prismaClient: prisma,
     googleVerifier: google,
+    appleVerifier: apple,
     emailSender: email,
     pushSender: push,
   });
   await app.ready();
 
-  return { app, google, email, push };
+  return { app, google, apple, email, push };
 }
 
 /// Cascades from `users` reach characters and their children, and every table

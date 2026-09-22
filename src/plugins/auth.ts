@@ -3,6 +3,8 @@ import fastifyJwt from '@fastify/jwt';
 import fp from 'fastify-plugin';
 import { unauthorized } from '../lib/errors.js';
 import { AuthService } from '../modules/auth/auth.service.js';
+import { createAppleVerifier } from '../modules/auth/apple-verifier.js';
+import type { AppleVerifier } from '../modules/auth/apple-verifier.js';
 import { createGoogleVerifier } from '../modules/auth/google-verifier.js';
 import type { GoogleVerifier } from '../modules/auth/google-verifier.js';
 
@@ -27,8 +29,10 @@ export interface AuthPluginOptions {
   accessTokenTtl: string;
   refreshTokenTtlDays: number;
   googleClientIds: string[];
-  /// Test seam: lets integration tests bypass real Google token verification.
+  appleClientIds: string[];
+  /// Test seams: let integration tests bypass real token verification.
   googleVerifier?: GoogleVerifier;
+  appleVerifier?: AppleVerifier;
 }
 
 const authPlugin: FastifyPluginAsync<AuthPluginOptions> = async (app, options) => {
@@ -37,9 +41,17 @@ const authPlugin: FastifyPluginAsync<AuthPluginOptions> = async (app, options) =
     sign: { expiresIn: options.accessTokenTtl },
   });
 
+  // Sans audience declaree, aucun jeton Apple ne peut etre accepte. L'API
+  // demarre quand meme — la connexion Google n'a pas a tomber avec — mais le
+  // dit, plutot que de laisser chercher pourquoi un bouton refuse.
+  if (options.appleClientIds.length === 0) {
+    app.log.warn('APPLE_CLIENT_IDS is empty: Apple sign-in will refuse every token');
+  }
+
   const service = new AuthService({
     prisma: app.prisma,
     google: options.googleVerifier ?? createGoogleVerifier(options.googleClientIds),
+    apple: options.appleVerifier ?? createAppleVerifier(options.appleClientIds),
     signAccessToken: (payload) => app.jwt.sign(payload),
     accessTokenTtl: options.accessTokenTtl,
     refreshTokenTtlDays: options.refreshTokenTtlDays,
