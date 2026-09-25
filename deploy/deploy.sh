@@ -27,15 +27,23 @@ echo "==> Status"
 docker compose ps
 
 echo
-echo "==> Waiting for the API to become healthy"
-for _ in $(seq 1 30); do
-  if docker compose exec -T api node -e "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" 2>/dev/null; then
-    echo "API is healthy."
-    exit 0
-  fi
-  sleep 2
-done
+# The admin API waits on the API's healthcheck before it starts, so it is
+# always the last of the two to answer.
+wait_healthy() {
+  local service="$1" port="$2"
+  echo "==> Waiting for '$service' to become healthy"
+  for _ in $(seq 1 30); do
+    if docker compose exec -T "$service" node -e "fetch('http://127.0.0.1:$port/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" 2>/dev/null; then
+      echo "'$service' is healthy."
+      return 0
+    fi
+    sleep 2
+  done
 
-echo "API did not become healthy in time. Recent logs:" >&2
-docker compose logs --tail 50 api >&2
-exit 1
+  echo "'$service' did not become healthy in time. Recent logs:" >&2
+  docker compose logs --tail 50 "$service" >&2
+  return 1
+}
+
+wait_healthy api 3000
+wait_healthy admin 4000

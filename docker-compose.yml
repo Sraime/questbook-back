@@ -53,6 +53,37 @@ services:
       retries: 5
       start_period: 30s
 
+  # Le backoffice. Meme image que l'API, meme base, autre processus.
+  admin:
+    build: .
+    restart: unless-stopped
+    logging: *journaux
+    env_file: .env
+    depends_on:
+      api:
+        condition: service_healthy
+    # C'est cette ligne, et elle seule, qui ferme le backoffice au monde. Un
+    # `4000:4000` nu publierait sur toutes les interfaces en ecrivant
+    # directement dans netfilter, donc sans que UFW ne l'indique nulle part.
+    # On y accede par un tunnel : ssh -L 4000:127.0.0.1:4000 -p 2222 <vps>
+    ports:
+      - '127.0.0.1:4000:4000'
+    # Pas le point d'entree par defaut : lui applique les migrations, et deux
+    # conteneurs qui les appliquent au meme demarrage se disputent le verrou
+    # de Prisma. `depends_on: api` garantit qu'elles sont deja passees.
+    entrypoint: ['node']
+    command: ['dist/admin.js']
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped

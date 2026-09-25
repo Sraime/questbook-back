@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
+import { buildAdminApp } from '../../src/admin/app.js';
 import { buildApp } from '../../src/app.js';
 import { loadEnv } from '../../src/config/env.js';
 import { unauthorized } from '../../src/lib/errors.js';
@@ -146,6 +147,23 @@ export async function createTestApp(): Promise<TestContext> {
   await app.ready();
 
   return { app, google, apple, email, push };
+}
+
+/// The back office API, on the same test database. It takes no fakes: nothing
+/// in it reaches a third party, which is half the point of keeping it apart.
+export async function createAdminTestApp(): Promise<FastifyInstance> {
+  const env = loadEnv({
+    NODE_ENV: 'test',
+    DATABASE_URL: databaseUrl,
+    JWT_SECRET: 'test-jwt-secret-long-enough-for-hs256-signing',
+    GOOGLE_CLIENT_IDS: 'test-client-id.apps.googleusercontent.com',
+    LOG_LEVEL: 'silent',
+  } as NodeJS.ProcessEnv);
+
+  const app = await buildAdminApp({ env, prismaClient: prisma });
+  await app.ready();
+
+  return app;
 }
 
 /// Cascades from `users` reach characters and their children, and every table

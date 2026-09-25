@@ -14,6 +14,13 @@ const envSchema = z.object({
     .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
     .default('info'),
 
+  /// The back office API, a second process built from this same repository.
+  /// It binds `0.0.0.0` inside its container like any other service: what
+  /// keeps it off the internet is the loopback publish address in
+  /// `docker-compose.yml`, not this host.
+  ADMIN_HOST: z.string().default('0.0.0.0'),
+  ADMIN_PORT: z.coerce.number().int().positive().default(4000),
+
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
 
   // 32+ chars: anything shorter is brute-forceable for an HS256 signing key.
