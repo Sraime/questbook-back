@@ -1,8 +1,11 @@
 import { PrismaClient } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
+import { buildAdminApp } from '../../src/admin/app.js';
 import { buildApp } from '../../src/app.js';
 import { loadEnv } from '../../src/config/env.js';
 import { unauthorized } from '../../src/lib/errors.js';
+import { hashPassword } from '../../src/lib/password.js';
+import { currentStep, generateTotpSecret, totpCode } from '../../src/lib/totp.js';
 import type { EmailMessage, EmailSender } from '../../src/lib/email-sender.js';
 import type {
   PushMessage,
@@ -148,14 +151,56 @@ export async function createTestApp(): Promise<TestContext> {
   return { app, google, apple, email, push };
 }
 
+/// The back office API, on the same test database. It takes no fakes: nothing
+/// in it reaches a third party, which is half the point of keeping it apart.
+export async function createAdminTestApp(): Promise<FastifyInstance> {
+  const env = loadEnv({
+    NODE_ENV: 'test',
+    DATABASE_URL: databaseUrl,
+    JWT_SECRET: 'test-jwt-secret-long-enough-for-hs256-signing',
+    GOOGLE_CLIENT_IDS: 'test-client-id.apps.googleusercontent.com',
+    LOG_LEVEL: 'silent',
+  } as NodeJS.ProcessEnv);
+
+  const app = await buildAdminApp({ env, prismaClient: prisma });
+  await app.ready();
+
+  return app;
+}
+
 /// Cascades from `users` reach characters and their children, and every table
 /// added below. Listing them all anyway keeps the reset honest if a future
 /// model ever stops cascading from a user.
 export async function resetDatabase(): Promise<void> {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE users, characters, character_stats, character_resources, inventory_items, refresh_tokens, game_tables, table_members, table_invitations, game_sessions, session_attendances, session_npcs, session_boards, device_tokens, notifications, scenarios, scenario_annexes, scenario_ownerships, shop_items, shop_item_ownerships, reports, user_blocks RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE users, characters, character_stats, character_resources, inventory_items, refresh_tokens, game_tables, table_members, table_invitations, game_sessions, session_attendances, session_npcs, session_boards, device_tokens, notifications, scenarios, scenario_annexes, scenario_ownerships, shop_items, shop_item_ownerships, reports, user_blocks, admin_users, admin_sessions, admin_audit_log RESTART IDENTITY CASCADE',
   );
 }
+
+export interface SeededAdmin {
+  id: string;
+  login: string;
+  password: string;
+  totpSecret: string;
+}
+
+/// An administrator whose password and TOTP secret the test knows, so it can
+/// sign in the way the front will.
+export async function seedAdmin(
+  login = 'robin',
+  password = 'un-mot-de-passe-assez-long',
+): Promise<SeededAdmin> {
+  const totpSecret = generateTotpSecret();
+  const admin = await prisma.adminUser.create({
+    data: { login, passwordHash: await hashPassword(password), totpSecret },
+  });
+
+  return { id: admin.id, login, password, totpSecret };
+}
+
+/// The code an authenticator app would be showing right now.
+export const totpFor = (admin: SeededAdmin, at: Date = new Date()): string =>
+  totpCode(admin.totpSecret, currentStep(at));
 
 export interface SignedInUser {
   accessToken: string;

@@ -39,6 +39,16 @@ model User {
   /// suivante sans deviner qui avait vu quoi.
   termsAcceptedAt DateTime? @map("terms_accepted_at")
 
+  /// Quand l'administration a ferme la porte a ce compte, et jusqu'a quand.
+  ///
+  /// Nul dans `suspendedUntil` veut dire indefiniment : une suspension datee
+  /// expire d'elle-meme, lue a chaque controle, sans tache de fond pour la
+  /// lever. Le motif est **affiche au joueur**, donc ecrit en francais et
+  /// accentue — il le lira sur l'ecran qui lui apprend la nouvelle.
+  suspendedAt      DateTime? @map("suspended_at")
+  suspendedUntil   DateTime? @map("suspended_until")
+  suspensionReason String?   @map("suspension_reason")
+
   characters    Character[]
   refreshTokens RefreshToken[]
 
@@ -488,14 +498,32 @@ model Report {
   reason         String   @db.Text
   createdAt      DateTime @default(now()) @map("created_at")
 
-  reporter     User @relation("ReportAuthor", fields: [reporterId], references: [id], onDelete: Cascade)
-  reportedUser User @relation("ReportedUser", fields: [reportedUserId], references: [id], onDelete: Cascade)
+  /// `open` puis `resolved`. Sans cette colonne, savoir ce qui restait a
+  /// examiner demandait un `psql` sur le VPS — alors que les conditions
+  /// d'utilisation annoncent un examen sous vingt-quatre heures.
+  status String @default("open")
+
+  /// Ce qui a ete decide : `dismissed`, `warned`, et plus tard `suspended` ou
+  /// `deleted`, quand ces gestes existeront.
+  resolution     String?   @map("resolution")
+  /// Le mot du support, pour le prochain qui relit le dossier.
+  resolutionNote String?   @map("resolution_note") @db.Text
+  resolvedAt     DateTime? @map("resolved_at")
+  resolvedById   String?   @map("resolved_by_id")
+
+  reporter     User       @relation("ReportAuthor", fields: [reporterId], references: [id], onDelete: Cascade)
+  reportedUser User       @relation("ReportedUser", fields: [reportedUserId], references: [id], onDelete: Cascade)
+  /// `SetNull` : un compte d'administration ferme ne doit pas emporter
+  /// l'historique des dossiers qu'il a tranches.
+  resolvedBy   AdminUser? @relation(fields: [resolvedById], references: [id], onDelete: SetNull)
 
   /// Signaler deux fois la même chose n'ajoute rien au dossier et donne un
   /// levier de harcèlement par le nombre.
   @@unique([reporterId, contentType, contentId])
   @@index([createdAt])
   @@index([reportedUserId])
+  /// La file du backoffice : les dossiers ouverts, le plus ancien en tete.
+  @@index([status, createdAt])
   @@map("reports")
 }
 
@@ -520,4 +548,115 @@ model UserBlock {
   @@unique([blockerId, blockedId])
   @@index([blockedId])
   @@map("user_blocks")
+}
+
+/// Qui peut entrer dans le backoffice.
+///
+/// Aucune relation vers `User` : un administrateur n'est pas un joueur avec un
+/// drapeau. Les deux populations n'ont ni la meme porte, ni la meme facon de
+/// prouver qui elles sont, ni les memes consequences si l'une fuit — les
+/// melanger ferait qu'une faille dans la connexion des joueurs deviendrait une
+/// faille dans l'administration.
+///
+/// Pas de Google ici non plus : un joueur passe par un fournisseur tiers parce
+/// qu'une table se partage et que chacun doit etre reconnaissable des autres.
+/// Un administrateur n'a personne a qui se presenter, et faire dependre
+/// l'acces au backoffice d'un service exterieur n'apporterait rien.
+model AdminUser {
+  id String @id @default(uuid())
+
+  login String @unique
+
+  /// scrypt, avec son sel, dans le format produit par `lib/password.ts`.
+  passwordHash String @map("password_hash")
+
+  /// Le secret TOTP en base32, tel que `scripts/create-admin.ts` l'a tire.
+  totpSecret String @map("totp_secret")
+
+  /// Le dernier pas de temps TOTP consomme. Un code vaut trente secondes, et
+  /// sans cette borne il serait rejouable pendant tout ce temps par qui
+  /// regarde par-dessus l'epaule.
+  lastTotpStep BigInt? @map("last_totp_step")
+
+  /// Echecs consecutifs, remis a zero par une reussite. Au-dela du plafond,
+  /// `lockedUntil` ferme la porte pour un temps : un mot de passe se devine
+  /// par la repetition, et c'est la repetition qu'on coupe.
+  failedCount Int       @default(0) @map("failed_count")
+  lockedUntil DateTime? @map("locked_until")
+
+  lastLoginAt DateTime? @map("last_login_at")
+
+  /// Retire l'acces sans effacer les lignes d'audit qui nomment ce compte.
+  disabledAt DateTime? @map("disabled_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  sessions        AdminSession[]
+  auditLog        AdminAuditEntry[]
+  resolvedReports Report[]
+
+  @@map("admin_users")
+}
+
+/// Une session ouverte dans le backoffice.
+///
+/// Un jeton opaque hache, sur le modele des `refresh_tokens` et des jetons
+/// d'invitation, plutot qu'un JWT autoporteur : un backoffice doit pouvoir
+/// etre deconnecte a distance, ce qu'un jeton que le serveur ne relit jamais
+/// ne permet pas.
+model AdminSession {
+  id      String @id @default(uuid())
+  adminId String @map("admin_id")
+
+  tokenHash String @unique @map("token_hash")
+
+  /// Glissante : chaque requete la repousse, si bien qu'un poste laisse seul
+  /// se referme, et qu'une soiree de moderation ne se fait pas interrompre.
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  admin AdminUser @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId])
+  @@index([expiresAt])
+  @@map("admin_sessions")
+}
+
+/// Ce que l'administration a fait, et quand.
+///
+/// C'est le seul composant du produit capable de lire les donnees de tout le
+/// monde et d'effacer le compte de quelqu'un : la trace n'est pas une option.
+/// Chaque carte suivante ecrit sa ligne **dans la transaction** de l'action
+/// qu'elle journalise, comme le font deja les notifications — un journal ecrit
+/// apres coup manque precisement les cas ou il servirait.
+///
+/// Rien n'efface ces lignes, et aucune route ne les modifie.
+model AdminAuditEntry {
+  id String @id @default(uuid())
+
+  /// Nul quand la tentative n'a identifie personne : un echec de connexion sur
+  /// un login inconnu merite sa ligne autant qu'une reussite.
+  adminId String? @map("admin_id")
+
+  /// `login.success`, `login.failure`, `logout`… Du texte, comme les autres
+  /// enumerations ici.
+  action String
+
+  targetType String? @map("target_type")
+  targetId   String? @map("target_id")
+
+  /// Le detail utile a la relecture, en JSON. Jamais de secret : ni mot de
+  /// passe, ni code, ni jeton de session.
+  details String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  admin AdminUser? @relation(fields: [adminId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([adminId, createdAt])
+  @@map("admin_audit_log")
 }

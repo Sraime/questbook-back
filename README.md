@@ -22,6 +22,7 @@ UI et documentation en **français**, code et commentaires en **anglais**
 - [Architecture](#architecture)
 - [Modèle de données](#modèle-de-données)
 - [Authentification](#authentification)
+- [Le backoffice](#le-backoffice)
 - [Endpoints](#endpoints)
 - [Tables, sessions et notifications](#tables-sessions-et-notifications)
 - [Synchronisation](#synchronisation)
@@ -38,9 +39,23 @@ UI et documentation en **français**, code et commentaires en **anglais**
 src/
 ├── index.ts                  point d'entrée : charge la config, démarre le serveur
 ├── app.ts                    construction de l'instance Fastify (plugins, routes, erreurs)
+├── admin.ts                  point d'entrée du backoffice — voir plus bas
+├── admin/
+│   ├── app.ts                la seconde instance Fastify, celle de l'administration
+│   ├── audit.ts              `recordAudit` : ce que l'administration a fait
+│   ├── auth/                 connexion par mot de passe et TOTP
+│   ├── reports/              la file des signalements
+│   ├── users/                suspendre, lever, fermer un compte
+│   └── plugins/admin-auth.ts `app.requireAdmin`, la garde du backoffice
 ├── config/env.ts             validation zod des variables d'environnement
+│
+│  (et, hors de `src/`, `admin-web/` : le front local du backoffice)
 ├── lib/
 │   ├── errors.ts             AppError + helpers (badRequest, notFound, conflict…)
+│   ├── fastify-errors.ts     le gestionnaire d'erreurs, partagé par les deux API
+│   ├── tokens.ts             jetons opaques et leur empreinte SHA-256
+│   ├── password.ts           hachage scrypt, pour les seuls comptes d'administration
+│   ├── totp.ts               second facteur RFC 6238
 │   ├── email-sender.ts       interface EmailSender + implémentation Resend
 │   └── push-sender.ts        interface PushSender + implémentation FCM HTTP v1
 ├── plugins/
@@ -69,7 +84,9 @@ Trois principes structurent le code :
 
 ### Gestion des erreurs
 
-Le gestionnaire d'erreurs central traduit tout en `{ "error": { "code", "message" } }`.
+`installErrorHandling` traduit tout en `{ "error": { "code", "message" } }`, et
+sert **les deux API** : deux copies divergeraient, et un client qui a appris
+une forme d'erreur en rencontrerait une autre.
 
 > ⚠️ Il est installé **avant** les `register` de routes. Fastify fige le
 > gestionnaire d'erreurs au moment où chaque contexte encapsulé est créé : un
@@ -118,8 +135,11 @@ garde une identité unique sur tous les appareils, sans table de correspondance.
 | `shop_item_ownerships`| Qui a acheté quoi                                                 |
 | `device_tokens`       | Jetons FCM, un par appareil                                       |
 | `notifications`       | Historique consultable dans l'app                                 |
-| `reports`             | Signalements, avec l'instantané du contenu au moment du geste     |
+| `reports`             | Signalements, leur instantané du contenu, et ce qu'en a décidé le support |
 | `user_blocks`         | Qui a bloqué qui, à sens unique                                   |
+| `admin_users`         | Les comptes du [backoffice](#le-backoffice). Aucun lien vers `users` |
+| `admin_sessions`      | Sessions d'administration, jeton stocké **haché**, révocables     |
+| `admin_audit_log`     | Ce que l'administration a fait, et les tentatives pour y entrer   |
 
 Les champs des personnages reproduisent exactement les modèles Freezed de l'app
 (`Character`, `CharacterStat`, `CharacterResource`, `InventoryItem`). Les
@@ -286,6 +306,378 @@ Ce qui reste une affaire d'exploitation, pas de code (voir aussi le VPS) :
 
 - chiffrement du disque du VPS et des sauvegardes du volume Postgres ;
 - DPA Resend, avant une ouverture publique.
+
+---
+
+## Le backoffice
+
+Une **seconde application Fastify**, montée par `buildAdminApp`, démarrée par
+`src/admin.ts`, servie par la même image Docker et la même base. C'est de là
+que se suivent les signalements, se modère et s'administre le contenu.
+
+Elle est séparée parce que les deux API font l'inverse l'une de l'autre :
+chaque route de l'API produit enferme un compte dans ses propres données,
+chaque route du backoffice lit à travers tous les comptes. Partager un
+écouteur, ce serait partager une surface, et une seule route mal gardée
+mettrait tout le catalogue de données personnelles à un bug d'authentification.
+
+**Mais elles partagent le dépôt, le schéma Prisma et l'image**, volontairement.
+Deux copies du modèle finissent toujours par diverger, et ce projet a déjà une
+règle entière sur le jour où l'app est partie devant son backend.
+
+### Elle n'est pas sur Internet
+
+Caddy ne la connaît pas : pas de bloc de site, pas de sous-domaine, pas de
+certificat de plus à renouveler. Le conteneur publie sur la **boucle locale du
+VPS**, et rien d'autre :
+
+```yaml
+ports:
+  - '127.0.0.1:4000:4000'
+```
+
+> Cette ligne est toute la sécurité du backoffice. Un `4000:4000` nu publierait
+> sur toutes les interfaces, en écrivant directement dans netfilter — donc
+> **sans que UFW ne l'indique nulle part**, comme le rappelle déjà la section
+> Firewall. Le préfixe n'est pas décoratif.
+
+On y accède par un tunnel SSH, sur la clé et le port qui servent déjà au
+déploiement :
+
+```powershell
+ssh -i "$env:USERPROFILE\.ssh\questbook_vps_ed25519" -p 2222 `
+  -N -L 4000:127.0.0.1:4000 debian@151.80.144.246
+```
+
+```bash
+ssh -i ~/.ssh/questbook_vps_ed25519 -p 2222 \
+  -N -L 4000:127.0.0.1:4000 debian@151.80.144.246
+```
+
+Le front local parle alors à `http://localhost:4000`.
+
+`ADMIN_HOST` vaut pourtant `0.0.0.0`, et ce n'est pas une contradiction :
+écouter la boucle locale **du conteneur** le rendrait invisible à la
+redirection de port de Docker elle-même. Ce qui ferme cette API est l'adresse
+de publication, pas l'adresse d'écoute.
+
+### Ce qu'elle n'a pas
+
+- **Pas de CORS.** Le front local passe par le proxy de son serveur de dev, si
+  bien que le navigateur ne parle qu'à sa propre origine. Il n'y a aucune
+  origine à autoriser, et en autoriser une serait le premier trou dans une
+  porte dont toute la défense est d'être fermée. Un test l'épingle.
+- **Pas de parseur de corps JSON vide.** Celui de `app.ts` ménage Dio, qui
+  estampille `application/json` sans corps ; `fetch` ne le fait pas.
+- **Pas de `/v1`.** Cette API et son front partent du même dépôt, dans le même
+  geste, et n'ont jamais à se contredire.
+
+### Le conteneur n'applique pas les migrations
+
+`docker-entrypoint.sh` lance `prisma migrate deploy` avant de démarrer, et deux
+conteneurs qui l'exécutent au même démarrage se disputent le verrou de Prisma.
+Le service `admin` court-circuite donc ce point d'entrée (`entrypoint: node`)
+et attend que l'API soit saine, ce qui garantit que les migrations sont déjà
+passées.
+
+### La connexion
+
+Le tunnel prouve qu'une machine a la clé du VPS. Il ne dit pas qui est devant
+le clavier, et un portable qui change de mains emporte la clé avec lui. Le
+backoffice a donc sa propre ouverture de session, sans aucun rapport avec celle
+des joueurs.
+
+| Méthode  | Route                  | Description                               |
+| -------- | ---------------------- | ----------------------------------------- |
+| `POST`   | `/admin/auth/session`  | `{ login, password, totp }` → jeton (201) |
+| `DELETE` | `/admin/auth/session`  | Referme la session courante (204)         |
+| `GET`    | `/admin/auth/me`       | Le compte connecté                        |
+
+**Pas de Google ici.** Un joueur passe par un fournisseur tiers parce qu'une
+table se partage et que chacun doit être reconnaissable des autres. Un
+administrateur n'a personne à qui se présenter : faire dépendre l'accès au
+backoffice d'un service extérieur n'apporterait rien et exposerait une surface
+OAuth de plus.
+
+`admin_users` n'a d'ailleurs **aucune relation vers `users`** : un
+administrateur n'est pas un joueur avec un drapeau. Les deux populations n'ont
+ni la même porte, ni la même façon de prouver qui elles sont, et les mélanger
+ferait qu'une faille dans la connexion des joueurs deviendrait une faille dans
+l'administration.
+
+#### Deux primitives écrites à la main, et pourquoi
+
+- **`scrypt` plutôt qu'argon2.** Argon2 est un module natif à compiler dans
+  l'image Docker, et l'écart entre les deux est théorique pour une connexion
+  limitée en débit, verrouillée après cinq échecs et joignable par un seul
+  tunnel. `scrypt` est dans la bibliothèque standard. Les paramètres voyagent
+  dans l'empreinte, donc les relever plus tard n'invalidera pas l'existant.
+- **TOTP sur `node:crypto`.** Un HMAC, un compteur et un modulo. C'est le parti
+  pris d'`apple-verifier.ts`, qui vérifie une signature RS256 à la main plutôt
+  que de dépendre d'une bibliothèque JWT entière. Les **vecteurs de référence
+  de la RFC 6238** sont dans la suite de tests : c'est ce qui rend le choix
+  défendable.
+
+#### Ce qui freine une attaque
+
+- **Une seule réponse à tous les refus**, `401 Identifiants invalides`. Dire
+  laquelle des deux moitiés est fausse diviserait par deux le travail de
+  deviner l'autre, et dire que le login existe nommerait le compte à attaquer.
+  Un login inconnu est même vérifié contre une empreinte leurre, pour qu'il
+  coûte le même temps qu'un login connu.
+- **Verrouillage** après cinq échecs consécutifs, quinze minutes.
+- **Un budget de requêtes propre à la connexion**, dix par cinq minutes, bien
+  en dessous de celui de l'application. Il couvre ce qu'aucun verrou par compte
+  ne voit : un même mot de passe essayé sur beaucoup de logins.
+- **Un code TOTP ne sert qu'une fois.** Il reste valable ses trente secondes,
+  donc qui l'a lu par-dessus l'épaule pourrait le rejouer ; `last_totp_step`
+  l'en empêche.
+
+#### La session
+
+Un **jeton opaque haché** en base, sur le modèle des `refresh_tokens` et des
+jetons d'invitation, plutôt qu'un JWT. La raison est précise : un backoffice
+doit pouvoir être déconnecté à distance, ce qu'un jeton que le serveur ne
+relit jamais ne permet pas.
+
+Trente minutes, **glissantes** : chaque requête repousse l'échéance, si bien
+qu'un poste laissé seul se referme et qu'une soirée de modération ne se fait
+pas interrompre au milieu d'un dossier.
+
+#### Le journal d'audit
+
+`admin_audit_log` enregistre ce que l'administration a fait. C'est le seul
+composant du produit capable de lire les données de tout le monde et d'effacer
+le compte de quelqu'un : la trace n'est pas une option.
+
+`recordAudit` prend un client Prisma **ou une transaction ouverte**, et les
+appelants écrivent leur ligne dans la transaction de l'action qu'elle
+journalise — comme le font déjà les notifications. Un journal écrit après coup
+manque précisément les cas où il servirait, ceux qui ont échoué en chemin.
+
+`admin_id` est nullable : une tentative sur un login inconnu mérite sa ligne
+autant qu'une réussite, et c'est même la plus intéressante des deux. Aucun
+secret n'y entre, et un test lit toutes les lignes que la connexion peut
+produire pour s'en assurer.
+
+### La file des signalements
+
+| Méthode | Route                        | Description                              |
+| ------- | ---------------------------- | ---------------------------------------- |
+| `GET`   | `/admin/reports`             | `?status=open\|resolved`, `limit`, `offset` |
+| `GET`   | `/admin/reports/:id`         | Le dossier complet                       |
+| `POST`  | `/admin/reports/:id/resolve` | `{ resolution, note? }`                  |
+
+`POST /api/v1/reports` enregistrait un signalement et réveillait le support par
+mail ; après quoi, plus rien. Savoir ce qui restait à examiner demandait un
+`psql` sur le VPS, alors que les conditions d'utilisation annoncent un examen
+**sous vingt-quatre heures**. C'est pour tenir cet engagement que cet écran
+existe avant les statistiques et l'administration du contenu.
+
+**Le plus ancien en tête.** La file se lit par son bout le plus urgent, celui
+qui approche des vingt-quatre heures.
+
+Le détail d'un dossier montre ce qui permet de décider, et rien de plus :
+l'instantané et le motif, les deux comptes, et **les autres dossiers visant le
+même compte**. Ce dernier point est le signal le plus utile du lot — deux
+personnes différentes qui signalent la même personne disent quelque chose
+qu'un dossier isolé ne dit pas.
+
+Trancher est **idempotent sans réécrire la date** : un double clic ne déplace
+pas le moment où le dossier a été tranché, exactement comme `POST /auth/terms`
+ne déplace pas un consentement. Une ligne d'audit part dans la transaction.
+Consulter la file, en revanche, n'est pas journalisé : c'est le geste ordinaire
+du poste, et une ligne par rafraîchissement noierait celles qui comptent.
+
+> `resolution` vaut `dismissed`, `warned`, `suspended` ou `deleted`. Les deux
+> derniers **ne sanctionnent personne par eux-mêmes** : ils disent ce qui a été
+> décidé, la sanction se posant plus bas. Les deux gestes restent séparés à
+> dessein — un compte se suspend souvent pour un faisceau de dossiers, pas pour
+> celui qu'on avait sous les yeux, et un dossier se classe parfois sans que
+> personne ne soit sanctionné.
+
+### Agir sur un compte
+
+| Méthode  | Route                       | Description                            |
+| -------- | --------------------------- | -------------------------------------- |
+| `GET`    | `/admin/users/suspended`    | Les mesures encore actives             |
+| `GET`    | `/admin/users/:id`          | Le compte, et ce qu'une fermeture détruirait |
+| `POST`   | `/admin/users/:id/suspend`  | `{ reason, until? }`                   |
+| `DELETE` | `/admin/users/:id/suspend`  | Lève la suspension                     |
+| `DELETE` | `/admin/users/:id`          | `{ confirmEmail }` — ferme le compte   |
+
+**Suspendre plutôt que supprimer.** Fermer est irréversible et emporte les
+tables que le compte animait : la bonne réponse à quelqu'un qui n'a rien à
+faire là, une réponse disproportionnée à un titre de séance grossier.
+
+`suspended_until` nul veut dire indéfiniment. Une suspension datée **expire
+d'elle-même**, relue à chaque contrôle plutôt que balayée par une tâche de
+fond : il n'y a pas d'ordonnanceur ici, et une colonne que personne ne nettoie
+garderait quelqu'un dehors pour toujours.
+
+C'est ce qui rend `GET /admin/users/suspended` moins anodin qu'il n'y paraît :
+**filtrer sur la seule présence de `suspended_at` listerait des comptes déjà
+revenus**, puisque rien ne l'efface à l'échéance. La route applique donc le
+même `isSuspended` que les quatre contrôles.
+
+L'ordre y porte le sens : **les indéfinies d'abord**, seules à attendre une
+décision humaine — sans écran qui les rappelle, elles deviennent une exclusion
+définitive par oubli plutôt que par décision — puis les datées, par échéance la
+plus proche.
+
+Cette route existe parce que la file des signalements ne répond pas à la
+question : une fois le dossier classé, le compte suspendu sort de l'écran.
+
+#### Elle mord à quatre endroits
+
+C'est le cœur de la chose. Une mesure qui ne mord qu'à trois des quatre est une
+mesure qu'on contourne, et le contournement n'est jamais celui qu'on
+surveillait.
+
+| Où | Pourquoi |
+| --- | --- |
+| `app.authenticate` | Le jeton d'accès déjà en main vaut encore un quart d'heure. |
+| `POST /auth/google` | Se reconnecter ne doit pas contourner la mesure. |
+| `POST /auth/apple` | Idem, par l'autre porte. |
+| `POST /auth/refresh` | Pour le jeton émis entre-temps, que la révocation rate. |
+
+Suspendre révoque au passage les jetons de rafraîchissement du compte, dans la
+même transaction. Ce n'est pas suffisant pour autant : un jeton émis juste
+avant survivrait, d'où le quatrième contrôle.
+
+Le prix est **une lecture par clé primaire à chaque requête authentifiée**, là
+où la garde ne touchait pas la base. C'est ce que coûte une suspension qui
+prend effet tout de suite plutôt que dans quinze minutes.
+
+#### Ce que le joueur reçoit
+
+`403` avec un code nommé, là où le reste de l'API préfère la discrétion :
+
+```json
+{
+  "error": {
+    "code": "ACCOUNT_SUSPENDED",
+    "message": "Ce compte est suspendu.",
+    "details": { "reason": "…", "until": "2026-09-26T20:39:16.708Z" }
+  }
+}
+```
+
+Un `404` n'aurait aucun sens ici : on parle à la personne même que la mesure
+vise, et la laisser croire à une panne ne ferait que la faire revenir dix fois.
+Le motif voyage parce qu'elle est censée le lire — c'est aussi pourquoi il est
+exigé : une sanction sans motif est une sanction qu'on ne peut pas contester.
+
+#### Fermer un compte
+
+C'est le seul endroit du produit où un tiers détruit les données de quelqu'un
+d'autre, et la cascade emporte les tables qu'il animait — `GameTable.ownerId`
+est en cascade, une table sans MJ étant une salle morte.
+
+L'appelant doit donc **recopier l'adresse du compte**, que `GET
+/admin/users/:id` vient de lui montrer avec le nombre de tables en jeu. C'est
+ce qui sépare une décision d'un faux mouvement de souris.
+
+La ligne d'audit est écrite **avant** la suppression et hors de sa transaction :
+`admin_audit_log` ne pointe pas vers `users`, mais une trace qui disparaîtrait
+avec ce qu'elle trace ne vaudrait rien.
+
+### Créer un compte
+
+Il n'y a pas de route d'inscription : un backoffice qui en ouvrirait une
+donnerait à Internet le formulaire qu'on cherche justement à lui cacher.
+
+```bash
+npm run admin:create robin              # nouveau compte
+npm run admin:create robin -- --reset   # même login, tout neuf
+```
+
+Le script demande le mot de passe deux fois, puis dessine un **QR code** à
+scanner dans une application d'authentification, avec la clé en base32 juste
+en dessous au cas où le QR passe mal — une fenêtre trop étroite suffit à le
+casser. **Rien de tout cela ne se réaffiche** : la base ne garde que de quoi
+vérifier un code, et le secret perdu se remplace par un `--reset`.
+
+#### Sur le VPS
+
+Le même outil, mais **compilé**, parce que l'image de production n'a ni `tsx`
+ni les sources TypeScript :
+
+```bash
+ssh -p 2222 debian@<vps> 'cd /opt/questbook && docker compose exec admin \
+  node dist/admin/cli/create-admin.js robin'
+```
+
+C'est la raison pour laquelle ces deux outils vivent dans `src/admin/cli/` et
+non dans `scripts/` : ce dernier n'est pas copié dans l'image, et un
+backoffice déployé sans moyen d'y créer le premier compte serait un backoffice
+auquel personne ne peut se connecter — sans porte de secours, puisqu'il n'y a
+pas d'inscription.
+
+Les comptes de la base de dev et ceux du VPS n'ont évidemment rien à voir.
+
+### Le front
+
+`admin-web/`, un projet Vite/React **qui n'est deployé nulle part**. Il tourne
+sur le poste de qui modère, le temps d'une session, et c'est tout ce qu'on lui
+demande : pas d'hébergement, pas de domaine, pas de build à distribuer, et une
+surface d'attaque qui se réduit à un onglet.
+
+```bash
+cd admin-web && npm install   # une fois
+npm run dev                   # http://localhost:5174
+```
+
+Il lui faut l'API d'administration à l'autre bout, **au choix** :
+
+```bash
+npm run dev:admin                              # la base de dev, sans risque
+../questbook-ia/scripts/tunnel-admin.sh        # le VPS, par le tunnel
+```
+
+> ⚠️ Le proxy pointe vers `127.0.0.1:4000` **dans les deux cas**, et rien à
+> l'écran ne dit lequel répond. Se tromper veut dire suspendre un vrai compte
+> en croyant jouer avec des données de dev. C'est pour cela que le script de
+> tunnel refuse de s'ouvrir quand le port est déjà pris, plutôt que de laisser
+> les deux se disputer l'adresse.
+
+Le jeton de session vit dans `sessionStorage`, et pas plus loin. En mémoire
+seulement aurait redemandé un code à chaque rechargement, ce qui pousse à
+garder l'onglet ouvert — l'inverse du but ; `localStorage` survivrait au
+navigateur, ce qui est trop.
+
+Le risque habituel de ce choix, le vol par script injecté, est écarté ici :
+aucune origine tierce ne parle à ce front, et **React échappe tout ce qu'il
+interpole**. Cela compte plus qu'ailleurs — c'est le seul écran du produit qui
+affiche, par construction, du texte écrit par quelqu'un qui cherchait à nuire.
+Jamais de `dangerouslySetInnerHTML` sur un instantané, jamais de `href`
+construit depuis un de ses champs.
+
+### En local
+
+```bash
+npm run dev:admin            # http://localhost:4000
+curl http://localhost:4000/health
+```
+
+Le compte se cree a la main, il n'y a pas de route d'inscription :
+
+```bash
+npm run admin:create robin    # ou -- --reset, si le secret est perdu
+```
+
+Le script demande un mot de passe — **sans rien afficher pendant la frappe**,
+pas meme des asterisques — puis imprime une URI `otpauth://` a donner une fois
+a une application d'authentification. Elle ne sera pas reaffichee.
+
+Pour essayer un ecran sans sortir son telephone a chaque rechargement :
+
+```bash
+npm run admin:totp robin              # le code courant, en clair
+```
+
+Il refuse de tourner sur une base qui n'est pas locale : il divulgue un second
+facteur, et `DATABASE_URL` peut pointer ailleurs qu'on ne le croit.
 
 ---
 
@@ -957,18 +1349,22 @@ push est ignoré. Pour l'activer :
 > `firebase-admin` aurait apporté des dizaines de mégaoctets pour le seul
 > endpoint réellement appelé ici.
 
-La pile Docker Compose contient trois services :
+La pile Docker Compose contient quatre services :
 
 - **`db`** — PostgreSQL 17, volume persistant, healthcheck ;
 - **`api`** — cette application, migrations appliquées au démarrage par
   `docker-entrypoint.sh` ;
+- **`admin`** — le [backoffice](#le-backoffice), même image, publié sur la
+  seule boucle locale et donc absent d'Internet ;
 - **`caddy`** — reverse proxy, **certificat Let's Encrypt obtenu et renouvelé
   automatiquement** (aucune tâche cron certbot à maintenir).
 
 ### Firewall
 
-Seul Caddy publie des ports. PostgreSQL et l'API restent sur le réseau Docker
-interne et ne sont **jamais** exposés à Internet. UFW n'a donc besoin que de :
+Seul Caddy publie des ports **vers l'extérieur**. PostgreSQL et l'API restent
+sur le réseau Docker interne et ne sont **jamais** exposés à Internet ; le
+backoffice publie sur `127.0.0.1` uniquement, ce qui revient au même vu du
+dehors. UFW n'a donc besoin que de :
 
 ```
 2222/tcp   ssh
@@ -979,15 +1375,38 @@ interne et ne sont **jamais** exposés à Internet. UFW n'a donc besoin que de :
 > Attention : les ports publiés par Docker contournent UFW en écrivant
 > directement dans netfilter. Ici les deux configurations coïncident (80/443),
 > mais ajouter un `ports:` à un service l'exposerait sans que UFW ne l'indique.
+> C'est pour cette raison exactement que celui du backoffice porte une adresse
+> de liaison, `127.0.0.1:4000:4000`, et pas seulement un numéro de port.
 
 ---
 
 ## Tests
 
-111 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
-des doublures pour Google, Resend et FCM, et une vraie base PostgreSQL — plus
-quatre cas dédiés à la minimisation des emails (JWT, membres de table, joueur
-sans nom, 404).
+282 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
+des doublures pour Google, Apple, Resend et FCM, et une vraie base PostgreSQL —
+plus quatre cas dédiés à la minimisation des emails (JWT, membres de table,
+joueur sans nom, 404).
+
+Le [backoffice](#le-backoffice) en occupe soixante-dix. Cinq épinglent la
+séparation des deux API — elles ne portent pas les routes l'une de l'autre, et
+celle d'administration n'autorise aucune origine navigateur. Neuf couvrent les
+deux primitives écrites à la main, **dont les vecteurs de référence de la
+RFC 6238** : c'est ce qui rend défendable de ne pas avoir pris de
+bibliothèque. Vingt et un suivent la connexion — même réponse à tous les refus,
+code rejoué, verrouillage, session révoquée, expirée, glissante, et le journal
+d'audit, y compris qu'aucun secret n'y entre jamais.
+
+Quinze suivent la file des signalements, et **les dossiers y naissent par l'API
+du produit** plutôt que fabriqués à la main : c'est le seul moyen que la file
+lise ce qu'un joueur dépose vraiment. L'un d'eux renomme la table après coup et
+vérifie que le dossier dit toujours ce qu'elle disait — c'est toute la raison
+d'être de l'instantané.
+
+Les vingt derniers portent les sanctions, et **quatre d'entre eux valent pour
+toute la carte** : ils vérifient qu'une suspension mord au jeton d'accès déjà
+en main, à la reconnexion Google, à la reconnexion Apple et au
+rafraîchissement. Un cinquième pose la suspension en base sans révoquer les
+jetons, pour couvrir seul le cas que la révocation rate.
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d

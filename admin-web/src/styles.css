@@ -1,0 +1,513 @@
+/* Un poste de travail, pas une vitrine : dense, lisible, sans animation.
+   On y passe du temps a lire du texte desagreable, et la seule chose que la
+   mise en page doive faire est de ne pas s'interposer. */
+
+:root {
+  --fond: #14161a;
+  --panneau: #1c1f25;
+  --panneau-clair: #23272f;
+  --bord: #2e333c;
+  --texte: #e6e8ec;
+  --doux: #9aa2af;
+  --accent: #c9a227;
+  --alerte: #e0574a;
+  --alerte-fond: #2a1b1a;
+  --ok: #5aa06a;
+  --rayon: 8px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--fond);
+  color: var(--texte);
+  font: 15px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0 0 0.4rem;
+  font-weight: 600;
+}
+h1 {
+  font-size: 1.5rem;
+}
+h2 {
+  font-size: 1.2rem;
+}
+h3 {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--doux);
+}
+
+p {
+  margin: 0 0 0.6rem;
+}
+
+.muted {
+  color: var(--doux);
+}
+.padded {
+  padding: 1rem;
+}
+.spacer {
+  flex: 1;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid var(--bord);
+  background: var(--panneau-clair);
+  color: var(--texte);
+  border-radius: var(--rayon);
+  padding: 0.5rem 0.9rem;
+}
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+button.link {
+  border: none;
+  background: none;
+  color: var(--doux);
+  padding: 0.2rem 0.4rem;
+  text-decoration: underline;
+}
+button.destructive {
+  border-color: var(--alerte);
+  color: var(--alerte);
+}
+
+input,
+textarea {
+  font: inherit;
+  width: 100%;
+  background: var(--fond);
+  color: var(--texte);
+  border: 1px solid var(--bord);
+  border-radius: var(--rayon);
+  padding: 0.5rem 0.6rem;
+}
+input:focus,
+textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+textarea {
+  resize: vertical;
+}
+
+/* --- Connexion ----------------------------------------------------------- */
+
+.signin {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+}
+.signin form {
+  width: 320px;
+  background: var(--panneau);
+  border: 1px solid var(--bord);
+  border-radius: 12px;
+  padding: 1.75rem;
+}
+.signin h1 {
+  margin-bottom: 0;
+}
+.signin > form > p {
+  margin-bottom: 1.5rem;
+}
+.signin label {
+  display: block;
+  margin-bottom: 0.9rem;
+  font-size: 0.85rem;
+  color: var(--doux);
+}
+.signin input {
+  margin-top: 0.3rem;
+}
+.signin button[type='submit'] {
+  width: 100%;
+  margin-top: 0.4rem;
+  border-color: var(--accent);
+}
+.error {
+  color: var(--alerte);
+  font-size: 0.9rem;
+}
+
+/* --- Cadre --------------------------------------------------------------- */
+
+.app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.top {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--bord);
+  background: var(--panneau);
+}
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.6rem 1rem;
+  background: var(--alerte-fond);
+  border-bottom: 1px solid var(--alerte);
+  color: var(--alerte);
+}
+.columns {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  min-height: 0;
+}
+
+.views {
+  display: flex;
+  gap: 0.2rem;
+  margin-left: 1rem;
+}
+.views button {
+  border: none;
+  background: none;
+  color: var(--doux);
+  padding: 0.35rem 0.7rem;
+  border-radius: var(--rayon);
+}
+.views button.active {
+  color: var(--texte);
+  background: var(--panneau-clair);
+}
+
+/* --- Les comptes suspendus ------------------------------------------------ */
+
+.suspended {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.5rem;
+  /* Une colonne lisible plutot que toute la largeur : chaque ligne se lit en
+     entier, motif compris, et la liste reste une liste. */
+  max-width: 760px;
+  width: 100%;
+  margin: 0 auto;
+}
+.suspended h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--doux);
+  margin: 0 0 1rem;
+}
+.suspended ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.suspended li {
+  background: var(--panneau);
+  border: 1px solid var(--bord);
+  border-radius: 12px;
+  padding: 1rem 1.2rem;
+  margin-bottom: 0.8rem;
+}
+.suspended .head {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+.suspended .who {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.suspended .term {
+  margin-left: auto;
+  white-space: nowrap;
+  color: var(--doux);
+  font-size: 0.85rem;
+}
+/* Une mesure sans terme n'expire pas : c'est la seule qui attende une
+   decision, et le seul endroit de cet ecran qui reclame le regard. */
+.suspended .term.watch {
+  color: var(--accent);
+  font-weight: 600;
+}
+.suspended .muted {
+  font-size: 0.85rem;
+  margin: 0.4rem 0 0.8rem;
+}
+.suspended .confirm {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
+/* --- La file ------------------------------------------------------------- */
+
+.queue {
+  border-right: 1px solid var(--bord);
+  background: var(--panneau);
+  overflow-y: auto;
+}
+.queue-tabs {
+  display: flex;
+  position: sticky;
+  top: 0;
+  background: var(--panneau);
+  border-bottom: 1px solid var(--bord);
+}
+.queue-tabs button {
+  flex: 1;
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: var(--doux);
+  padding: 0.8rem 0.5rem;
+  border-bottom: 2px solid transparent;
+}
+.queue-tabs button.active {
+  color: var(--texte);
+  border-bottom-color: var(--accent);
+}
+.count {
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #1a1a1a;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.queue ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.queue li button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-bottom: 1px solid var(--bord);
+  border-radius: 0;
+  background: none;
+  padding: 0.75rem 1rem;
+}
+.queue li button:hover {
+  background: var(--panneau-clair);
+}
+.queue li button.selected {
+  background: var(--panneau-clair);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.kind {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--doux);
+}
+.age {
+  font-size: 0.75rem;
+  color: var(--doux);
+}
+.age.late {
+  color: var(--alerte);
+  font-weight: 600;
+}
+.who {
+  display: block;
+  font-size: 0.85rem;
+  margin: 0.15rem 0;
+}
+.reason {
+  display: block;
+  color: var(--doux);
+  font-size: 0.85rem;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.verdict {
+  display: inline-block;
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--ok);
+}
+
+/* --- Le dossier ---------------------------------------------------------- */
+
+.detail {
+  overflow-y: auto;
+  padding: 1.5rem 2rem 4rem;
+  max-width: 760px;
+}
+.detail.empty {
+  display: grid;
+  place-items: center;
+}
+.detail header {
+  margin-bottom: 1.5rem;
+}
+
+.block {
+  background: var(--panneau);
+  border: 1px solid var(--bord);
+  border-radius: 12px;
+  padding: 1.1rem 1.25rem;
+  margin-bottom: 1rem;
+}
+.block.warn {
+  border-color: var(--accent);
+}
+.block.done {
+  border-color: var(--ok);
+}
+.block.sanction.suspended {
+  border-color: var(--alerte);
+}
+
+.quote {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border-left: 3px solid var(--bord);
+  padding-left: 0.8rem;
+  margin: 0.5rem 0;
+}
+
+.snapshot,
+.facts {
+  margin: 0;
+}
+.snapshot > div,
+.facts > div {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 0.75rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--bord);
+}
+.snapshot > div:last-child,
+.facts > div:last-child {
+  border-bottom: none;
+}
+dt {
+  color: var(--doux);
+  font-size: 0.85rem;
+}
+dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.others {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.others li {
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--bord);
+}
+
+/* --- Trancher ------------------------------------------------------------ */
+
+.choices {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0.6rem 0 1rem;
+}
+.choices label {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--bord);
+  border-radius: var(--rayon);
+  cursor: pointer;
+}
+.choices label.on {
+  border-color: var(--accent);
+  background: var(--panneau-clair);
+}
+.choices input {
+  width: auto;
+}
+.choices strong {
+  display: block;
+  font-weight: 600;
+}
+.choices em {
+  font-style: normal;
+  font-size: 0.8rem;
+  color: var(--doux);
+}
+
+.note {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--doux);
+  margin-bottom: 0.9rem;
+}
+.note textarea {
+  margin-top: 0.3rem;
+}
+
+.state {
+  margin-top: 0.8rem;
+}
+.durations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.9rem;
+}
+.chip {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.85rem;
+  border-radius: 999px;
+}
+.chip.on {
+  border-color: var(--accent);
+  background: var(--panneau-clair);
+}
+
+details.danger {
+  margin-top: 1.2rem;
+  border-top: 1px solid var(--bord);
+  padding-top: 0.8rem;
+}
+details.danger summary {
+  cursor: pointer;
+  color: var(--alerte);
+  font-size: 0.85rem;
+}
+details.danger input {
+  margin-bottom: 0.6rem;
+}
+code {
+  background: var(--fond);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+}
