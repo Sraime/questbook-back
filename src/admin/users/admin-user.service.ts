@@ -19,8 +19,58 @@ export interface AdminUserDetail {
   openReports: number;
 }
 
+/// Ce qu'il faut pour juger une mesure sans ouvrir le dossier : qui, pourquoi,
+/// depuis quand, et jusqu'a quand. Le compte des tables et des personnages n'y
+/// est pas — il coute une jointure par ligne et ne sert qu'a la fermeture.
+export interface SuspendedUserSummary {
+  id: string;
+  email: string;
+  displayName: string | null;
+  suspendedAt: string;
+  suspendedUntil: string | null;
+  suspensionReason: string | null;
+}
+
 export class AdminUserService {
   constructor(private readonly prisma: PrismaClient) {}
+
+  /// Les comptes sous le coup d'une mesure encore active.
+  ///
+  /// Une suspension datee expire d'elle-meme, sans que rien ne la balaie :
+  /// `suspendedAt` reste pose apres l'echeance. Filtrer sur sa seule presence
+  /// remplirait donc la liste de comptes deja revenus, et c'est exactement ce
+  /// qu'on ne veut pas montrer a quelqu'un qui cherche qui est encore dehors.
+  ///
+  /// L'ordre dit ce qu'il y a a faire : **les indefinies d'abord**, seules a
+  /// attendre une decision humaine — personne ne les reverra jamais si cet
+  /// ecran ne les montre pas — puis les datees, par echeance la plus proche.
+  async listSuspended(at: Date = new Date()): Promise<SuspendedUserSummary[]> {
+    const users = await this.prisma.user.findMany({
+      where: {
+        suspendedAt: { not: null },
+        OR: [{ suspendedUntil: null }, { suspendedUntil: { gt: at } }],
+      },
+      orderBy: [{ suspendedUntil: { sort: 'asc', nulls: 'first' } }, { suspendedAt: 'asc' }],
+      select: {
+        id: true,
+        email: true,
+        displayName: true,
+        suspendedAt: true,
+        suspendedUntil: true,
+        suspensionReason: true,
+      },
+    });
+
+    return users.map((user) => ({
+      id: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      // Le `where` l'exclut, mais le type le laisse nullable.
+      suspendedAt: user.suspendedAt!.toISOString(),
+      suspendedUntil: user.suspendedUntil?.toISOString() ?? null,
+      suspensionReason: user.suspensionReason,
+    }));
+  }
 
   async detail(id: string): Promise<AdminUserDetail> {
     const user = await this.prisma.user.findUnique({

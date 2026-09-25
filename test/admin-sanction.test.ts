@@ -270,6 +270,79 @@ describe('a dated suspension', () => {
   });
 });
 
+describe('the list of suspended accounts', () => {
+  const listSuspended = () =>
+    admin.inject({ method: 'GET', url: '/admin/users/suspended', headers: authHeader });
+
+  it('leaves out an account whose suspension has run out', async () => {
+    const dehors = await signIn(product, 'dehors');
+    const revenu = await signIn(product, 'revenu');
+
+    await suspend(dehors.userId, { reason: 'Toujours dehors.' });
+    await suspend(revenu.userId, {
+      until: new Date(Date.now() + 60_000).toISOString(),
+      reason: 'Bientot fini.',
+    });
+
+    // L'echeance passe. Rien ne balaie `suspendedAt`, qui reste pose : c'est
+    // precisement le piege que la liste doit eviter.
+    await prisma.user.update({
+      where: { id: revenu.userId },
+      data: { suspendedUntil: new Date(Date.now() - 1000) },
+    });
+
+    const listed = (await listSuspended()).json() as { id: string }[];
+
+    expect(listed.map((u) => u.id)).toEqual([dehors.userId]);
+  });
+
+  it('puts the indefinite ones first, then the soonest to end', async () => {
+    const tardif = await signIn(product, 'tardif');
+    const proche = await signIn(product, 'proche');
+    const indefini = await signIn(product, 'indefini');
+
+    await suspend(tardif.userId, {
+      until: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+      reason: 'Trente jours.',
+    });
+    await suspend(proche.userId, {
+      until: new Date(Date.now() + 86_400_000).toISOString(),
+      reason: 'Vingt-quatre heures.',
+    });
+    await suspend(indefini.userId, { reason: 'Sans terme.' });
+
+    const listed = (await listSuspended()).json() as { id: string }[];
+
+    expect(listed.map((u) => u.id)).toEqual([indefini.userId, proche.userId, tardif.userId]);
+  });
+
+  it('carries the reason, which is what lets one judge the measure', async () => {
+    const user = await signIn(product, 'genant');
+    await suspend(user.userId, { reason: 'Propos insultants envers un autre joueur.' });
+
+    expect((await listSuspended()).json()[0]).toMatchObject({
+      suspensionReason: 'Propos insultants envers un autre joueur.',
+      suspendedUntil: null,
+    });
+  });
+
+  it('empties out once the measure is lifted', async () => {
+    const user = await signIn(product, 'genant');
+    await suspend(user.userId, { reason: 'Erreur.' });
+    expect((await listSuspended()).json()).toHaveLength(1);
+
+    await lift(user.userId);
+
+    expect((await listSuspended()).json()).toEqual([]);
+  });
+
+  it('is closed to anyone without a session', async () => {
+    const anonymous = await admin.inject({ method: 'GET', url: '/admin/users/suspended' });
+
+    expect(anonymous.statusCode).toBe(401);
+  });
+});
+
 describe('closing an account', () => {
   const remove = (userId: string, confirmEmail: string) =>
     admin.inject({

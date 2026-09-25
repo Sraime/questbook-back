@@ -500,6 +500,7 @@ du poste, et une ligne par rafraîchissement noierait celles qui comptent.
 
 | Méthode  | Route                       | Description                            |
 | -------- | --------------------------- | -------------------------------------- |
+| `GET`    | `/admin/users/suspended`    | Les mesures encore actives             |
 | `GET`    | `/admin/users/:id`          | Le compte, et ce qu'une fermeture détruirait |
 | `POST`   | `/admin/users/:id/suspend`  | `{ reason, until? }`                   |
 | `DELETE` | `/admin/users/:id/suspend`  | Lève la suspension                     |
@@ -513,6 +514,19 @@ faire là, une réponse disproportionnée à un titre de séance grossier.
 d'elle-même**, relue à chaque contrôle plutôt que balayée par une tâche de
 fond : il n'y a pas d'ordonnanceur ici, et une colonne que personne ne nettoie
 garderait quelqu'un dehors pour toujours.
+
+C'est ce qui rend `GET /admin/users/suspended` moins anodin qu'il n'y paraît :
+**filtrer sur la seule présence de `suspended_at` listerait des comptes déjà
+revenus**, puisque rien ne l'efface à l'échéance. La route applique donc le
+même `isSuspended` que les quatre contrôles.
+
+L'ordre y porte le sens : **les indéfinies d'abord**, seules à attendre une
+décision humaine — sans écran qui les rappelle, elles deviennent une exclusion
+définitive par oubli plutôt que par décision — puis les datées, par échéance la
+plus proche.
+
+Cette route existe parce que la file des signalements ne répond pas à la
+question : une fois le dossier classé, le compte suspendu sort de l'écran.
 
 #### Elle mord à quatre endroits
 
@@ -574,13 +588,33 @@ Il n'y a pas de route d'inscription : un backoffice qui en ouvrirait une
 donnerait à Internet le formulaire qu'on cherche justement à lui cacher.
 
 ```bash
-npx tsx scripts/create-admin.ts robin            # nouveau compte
-npx tsx scripts/create-admin.ts robin --reset    # même login, tout neuf
+npm run admin:create robin              # nouveau compte
+npm run admin:create robin -- --reset   # même login, tout neuf
 ```
 
-Le script demande le mot de passe deux fois sans l'afficher, puis imprime une
-URI `otpauth://` à scanner. **Elle ne se réaffiche pas** : la base ne garde que
-de quoi vérifier un code, et le secret perdu se remplace par un `--reset`.
+Le script demande le mot de passe deux fois, puis dessine un **QR code** à
+scanner dans une application d'authentification, avec la clé en base32 juste
+en dessous au cas où le QR passe mal — une fenêtre trop étroite suffit à le
+casser. **Rien de tout cela ne se réaffiche** : la base ne garde que de quoi
+vérifier un code, et le secret perdu se remplace par un `--reset`.
+
+#### Sur le VPS
+
+Le même outil, mais **compilé**, parce que l'image de production n'a ni `tsx`
+ni les sources TypeScript :
+
+```bash
+ssh -p 2222 debian@<vps> 'cd /opt/questbook && docker compose exec admin \
+  node dist/admin/cli/create-admin.js robin'
+```
+
+C'est la raison pour laquelle ces deux outils vivent dans `src/admin/cli/` et
+non dans `scripts/` : ce dernier n'est pas copié dans l'image, et un
+backoffice déployé sans moyen d'y créer le premier compte serait un backoffice
+auquel personne ne peut se connecter — sans porte de secours, puisqu'il n'y a
+pas d'inscription.
+
+Les comptes de la base de dev et ceux du VPS n'ont évidemment rien à voir.
 
 ### Le front
 
@@ -629,7 +663,7 @@ curl http://localhost:4000/health
 Le compte se cree a la main, il n'y a pas de route d'inscription :
 
 ```bash
-npx tsx scripts/create-admin.ts robin           # ou --reset, si le secret est perdu
+npm run admin:create robin    # ou -- --reset, si le secret est perdu
 ```
 
 Le script demande un mot de passe — **sans rien afficher pendant la frappe**,
@@ -639,7 +673,7 @@ a une application d'authentification. Elle ne sera pas reaffichee.
 Pour essayer un ecran sans sortir son telephone a chaque rechargement :
 
 ```bash
-npx tsx scripts/totp-code.ts robin              # le code courant, en clair
+npm run admin:totp robin              # le code courant, en clair
 ```
 
 Il refuse de tourner sur une base qui n'est pas locale : il divulgue un second

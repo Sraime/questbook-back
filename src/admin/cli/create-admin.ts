@@ -14,8 +14,8 @@ import { existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { PrismaClient } from '@prisma/client';
 import { toString } from 'qrcode';
-import { hashPassword } from '../src/lib/password.js';
-import { generateTotpSecret, totpProvisioningUri } from '../src/lib/totp.js';
+import { hashPassword } from '../../lib/password.js';
+import { generateTotpSecret, totpProvisioningUri } from '../../lib/totp.js';
 
 if (existsSync('.env')) {
   process.loadEnvFile('.env');
