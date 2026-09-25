@@ -48,6 +48,8 @@ src/
 │   ├── users/                suspendre, lever, fermer un compte
 │   └── plugins/admin-auth.ts `app.requireAdmin`, la garde du backoffice
 ├── config/env.ts             validation zod des variables d'environnement
+│
+│  (et, hors de `src/`, `admin-web/` : le front local du backoffice)
 ├── lib/
 │   ├── errors.ts             AppError + helpers (badRequest, notFound, conflict…)
 │   ├── fastify-errors.ts     le gestionnaire d'erreurs, partagé par les deux API
@@ -579,6 +581,43 @@ npx tsx scripts/create-admin.ts robin --reset    # même login, tout neuf
 Le script demande le mot de passe deux fois sans l'afficher, puis imprime une
 URI `otpauth://` à scanner. **Elle ne se réaffiche pas** : la base ne garde que
 de quoi vérifier un code, et le secret perdu se remplace par un `--reset`.
+
+### Le front
+
+`admin-web/`, un projet Vite/React **qui n'est deployé nulle part**. Il tourne
+sur le poste de qui modère, le temps d'une session, et c'est tout ce qu'on lui
+demande : pas d'hébergement, pas de domaine, pas de build à distribuer, et une
+surface d'attaque qui se réduit à un onglet.
+
+```bash
+cd admin-web && npm install   # une fois
+npm run dev                   # http://localhost:5174
+```
+
+Il lui faut l'API d'administration à l'autre bout, **au choix** :
+
+```bash
+npm run dev:admin                              # la base de dev, sans risque
+../questbook-ia/scripts/tunnel-admin.sh        # le VPS, par le tunnel
+```
+
+> ⚠️ Le proxy pointe vers `127.0.0.1:4000` **dans les deux cas**, et rien à
+> l'écran ne dit lequel répond. Se tromper veut dire suspendre un vrai compte
+> en croyant jouer avec des données de dev. C'est pour cela que le script de
+> tunnel refuse de s'ouvrir quand le port est déjà pris, plutôt que de laisser
+> les deux se disputer l'adresse.
+
+Le jeton de session vit dans `sessionStorage`, et pas plus loin. En mémoire
+seulement aurait redemandé un code à chaque rechargement, ce qui pousse à
+garder l'onglet ouvert — l'inverse du but ; `localStorage` survivrait au
+navigateur, ce qui est trop.
+
+Le risque habituel de ce choix, le vol par script injecté, est écarté ici :
+aucune origine tierce ne parle à ce front, et **React échappe tout ce qu'il
+interpole**. Cela compte plus qu'ailleurs — c'est le seul écran du produit qui
+affiche, par construction, du texte écrit par quelqu'un qui cherchait à nuire.
+Jamais de `dangerouslySetInnerHTML` sur un instantané, jamais de `href`
+construit depuis un de ses champs.
 
 ### En local
 

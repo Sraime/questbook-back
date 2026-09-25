@@ -1,6 +1,7 @@
 node_modules/
 dist/
 coverage/
+*.tsbuildinfo
 
 # Secrets: JWT signing key, database password, Google client ids.
 .env
