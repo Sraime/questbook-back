@@ -22,6 +22,7 @@ UI et documentation en **français**, code et commentaires en **anglais**
 - [Architecture](#architecture)
 - [Modèle de données](#modèle-de-données)
 - [Authentification](#authentification)
+- [Le backoffice](#le-backoffice)
 - [Endpoints](#endpoints)
 - [Tables, sessions et notifications](#tables-sessions-et-notifications)
 - [Synchronisation](#synchronisation)
@@ -38,9 +39,12 @@ UI et documentation en **français**, code et commentaires en **anglais**
 src/
 ├── index.ts                  point d'entrée : charge la config, démarre le serveur
 ├── app.ts                    construction de l'instance Fastify (plugins, routes, erreurs)
+├── admin.ts                  point d'entrée du backoffice — voir plus bas
+├── admin/app.ts              la seconde instance Fastify, celle de l'administration
 ├── config/env.ts             validation zod des variables d'environnement
 ├── lib/
 │   ├── errors.ts             AppError + helpers (badRequest, notFound, conflict…)
+│   ├── fastify-errors.ts     le gestionnaire d'erreurs, partagé par les deux API
 │   ├── email-sender.ts       interface EmailSender + implémentation Resend
 │   └── push-sender.ts        interface PushSender + implémentation FCM HTTP v1
 ├── plugins/
@@ -69,7 +73,9 @@ Trois principes structurent le code :
 
 ### Gestion des erreurs
 
-Le gestionnaire d'erreurs central traduit tout en `{ "error": { "code", "message" } }`.
+`installErrorHandling` traduit tout en `{ "error": { "code", "message" } }`, et
+sert **les deux API** : deux copies divergeraient, et un client qui a appris
+une forme d'erreur en rencontrerait une autre.
 
 > ⚠️ Il est installé **avant** les `register` de routes. Fastify fige le
 > gestionnaire d'erreurs au moment où chaque contexte encapsulé est créé : un
@@ -286,6 +292,86 @@ Ce qui reste une affaire d'exploitation, pas de code (voir aussi le VPS) :
 
 - chiffrement du disque du VPS et des sauvegardes du volume Postgres ;
 - DPA Resend, avant une ouverture publique.
+
+---
+
+## Le backoffice
+
+Une **seconde application Fastify**, montée par `buildAdminApp`, démarrée par
+`src/admin.ts`, servie par la même image Docker et la même base. C'est de là
+que se suivent les signalements, se modère et s'administre le contenu.
+
+Elle est séparée parce que les deux API font l'inverse l'une de l'autre :
+chaque route de l'API produit enferme un compte dans ses propres données,
+chaque route du backoffice lit à travers tous les comptes. Partager un
+écouteur, ce serait partager une surface, et une seule route mal gardée
+mettrait tout le catalogue de données personnelles à un bug d'authentification.
+
+**Mais elles partagent le dépôt, le schéma Prisma et l'image**, volontairement.
+Deux copies du modèle finissent toujours par diverger, et ce projet a déjà une
+règle entière sur le jour où l'app est partie devant son backend.
+
+### Elle n'est pas sur Internet
+
+Caddy ne la connaît pas : pas de bloc de site, pas de sous-domaine, pas de
+certificat de plus à renouveler. Le conteneur publie sur la **boucle locale du
+VPS**, et rien d'autre :
+
+```yaml
+ports:
+  - '127.0.0.1:4000:4000'
+```
+
+> Cette ligne est toute la sécurité du backoffice. Un `4000:4000` nu publierait
+> sur toutes les interfaces, en écrivant directement dans netfilter — donc
+> **sans que UFW ne l'indique nulle part**, comme le rappelle déjà la section
+> Firewall. Le préfixe n'est pas décoratif.
+
+On y accède par un tunnel SSH, sur la clé et le port qui servent déjà au
+déploiement :
+
+```powershell
+ssh -i "$env:USERPROFILE\.ssh\questbook_vps_ed25519" -p 2222 `
+  -N -L 4000:127.0.0.1:4000 debian@151.80.144.246
+```
+
+```bash
+ssh -i ~/.ssh/questbook_vps_ed25519 -p 2222 \
+  -N -L 4000:127.0.0.1:4000 debian@151.80.144.246
+```
+
+Le front local parle alors à `http://localhost:4000`.
+
+`ADMIN_HOST` vaut pourtant `0.0.0.0`, et ce n'est pas une contradiction :
+écouter la boucle locale **du conteneur** le rendrait invisible à la
+redirection de port de Docker elle-même. Ce qui ferme cette API est l'adresse
+de publication, pas l'adresse d'écoute.
+
+### Ce qu'elle n'a pas
+
+- **Pas de CORS.** Le front local passe par le proxy de son serveur de dev, si
+  bien que le navigateur ne parle qu'à sa propre origine. Il n'y a aucune
+  origine à autoriser, et en autoriser une serait le premier trou dans une
+  porte dont toute la défense est d'être fermée. Un test l'épingle.
+- **Pas de parseur de corps JSON vide.** Celui de `app.ts` ménage Dio, qui
+  estampille `application/json` sans corps ; `fetch` ne le fait pas.
+- **Pas de `/v1`.** Cette API et son front partent du même dépôt, dans le même
+  geste, et n'ont jamais à se contredire.
+
+### Le conteneur n'applique pas les migrations
+
+`docker-entrypoint.sh` lance `prisma migrate deploy` avant de démarrer, et deux
+conteneurs qui l'exécutent au même démarrage se disputent le verrou de Prisma.
+Le service `admin` court-circuite donc ce point d'entrée (`entrypoint: node`)
+et attend que l'API soit saine, ce qui garantit que les migrations sont déjà
+passées.
+
+### En local
+
+```bash
+npm run dev:admin            # http://localhost:4000
+curl http://localhost:4000/health
+```
 
 ---
 
@@ -957,18 +1043,22 @@ push est ignoré. Pour l'activer :
 > `firebase-admin` aurait apporté des dizaines de mégaoctets pour le seul
 > endpoint réellement appelé ici.
 
-La pile Docker Compose contient trois services :
+La pile Docker Compose contient quatre services :
 
 - **`db`** — PostgreSQL 17, volume persistant, healthcheck ;
 - **`api`** — cette application, migrations appliquées au démarrage par
   `docker-entrypoint.sh` ;
+- **`admin`** — le [backoffice](#le-backoffice), même image, publié sur la
+  seule boucle locale et donc absent d'Internet ;
 - **`caddy`** — reverse proxy, **certificat Let's Encrypt obtenu et renouvelé
   automatiquement** (aucune tâche cron certbot à maintenir).
 
 ### Firewall
 
-Seul Caddy publie des ports. PostgreSQL et l'API restent sur le réseau Docker
-interne et ne sont **jamais** exposés à Internet. UFW n'a donc besoin que de :
+Seul Caddy publie des ports **vers l'extérieur**. PostgreSQL et l'API restent
+sur le réseau Docker interne et ne sont **jamais** exposés à Internet ; le
+backoffice publie sur `127.0.0.1` uniquement, ce qui revient au même vu du
+dehors. UFW n'a donc besoin que de :
 
 ```
 2222/tcp   ssh
@@ -979,15 +1069,19 @@ interne et ne sont **jamais** exposés à Internet. UFW n'a donc besoin que de :
 > Attention : les ports publiés par Docker contournent UFW en écrivant
 > directement dans netfilter. Ici les deux configurations coïncident (80/443),
 > mais ajouter un `ports:` à un service l'exposerait sans que UFW ne l'indique.
+> C'est pour cette raison exactement que celui du backoffice porte une adresse
+> de liaison, `127.0.0.1:4000:4000`, et pas seulement un numéro de port.
 
 ---
 
 ## Tests
 
-111 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
-des doublures pour Google, Resend et FCM, et une vraie base PostgreSQL — plus
-quatre cas dédiés à la minimisation des emails (JWT, membres de table, joueur
-sans nom, 404).
+217 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
+des doublures pour Google, Apple, Resend et FCM, et une vraie base PostgreSQL —
+plus quatre cas dédiés à la minimisation des emails (JWT, membres de table,
+joueur sans nom, 404), et cinq qui épinglent la séparation du
+[backoffice](#le-backoffice) : les deux API ne portent pas les routes l'une de
+l'autre, et celle d'administration n'autorise aucune origine navigateur.
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d

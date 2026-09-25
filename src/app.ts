@@ -2,14 +2,10 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
-import {
-  hasZodFastifySchemaValidationErrors,
-  serializerCompiler,
-  validatorCompiler,
-} from 'fastify-type-provider-zod';
+import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import type { PrismaClient } from '@prisma/client';
 import type { Env } from './config/env.js';
-import { AppError } from './lib/errors.js';
+import { installErrorHandling } from './lib/fastify-errors.js';
 import authPlugin from './plugins/auth.js';
 import boardLivePlugin from './plugins/board-live.js';
 import messagingPlugin from './plugins/messaging.js';
@@ -110,51 +106,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   // Must come before the route registrations below: each `register` creates an
   // encapsulated context that captures the error handler in place at that
   // moment, so a handler installed afterwards would never fire for them.
-  app.setErrorHandler((error, request, reply) => {
-    if (hasZodFastifySchemaValidationErrors(error)) {
-      return reply.code(400).send({
-        error: { code: 'VALIDATION_ERROR', message: 'Request payload is invalid' },
-        issues: error.validation,
-      });
-    }
-
-    if (error instanceof AppError) {
-      return reply.code(error.statusCode).send({
-        error: {
-          code: error.code,
-          message: error.message,
-          ...(error.details !== undefined ? { details: error.details } : {}),
-        },
-      });
-    }
-
-    // Fastify's own errors (rate limit, malformed JSON, ...) already carry a
-    // usable status; the type guards above widen `error` to unknown.
-    const fastifyError = error as FastifyError;
-    if (fastifyError.statusCode && fastifyError.statusCode < 500) {
-      return reply.code(fastifyError.statusCode).send({
-        error: {
-          code: fastifyError.code ?? 'REQUEST_ERROR',
-          message: fastifyError.message,
-        },
-      });
-    }
-
-    // Unexpected: log the real cause, tell the client nothing.
-    request.log.error({ err: error }, 'Unhandled error');
-    return reply.code(500).send({
-      error: { code: 'INTERNAL_ERROR', message: 'Internal server error' },
-    });
-  });
-
-  app.setNotFoundHandler((_request, reply) =>
-    reply.code(404).send({
-      error: {
-        code: 'NOT_FOUND',
-        message: 'Route not found',
-      },
-    }),
-  );
+  installErrorHandling(app);
 
   await app.register(helmet, { contentSecurityPolicy: false });
 

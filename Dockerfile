@@ -25,6 +25,8 @@ COPY --from=build /app/dist ./dist
 COPY docker-entrypoint.sh ./
 RUN chmod +x docker-entrypoint.sh && chown -R node:node /app
 USER node
-EXPOSE 3000
+# 3000 is the product API, 4000 the back office: one image, two processes, and
+# the compose file picks which one a container runs.
+EXPOSE 3000 4000
 ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["node", "dist/index.js"]
