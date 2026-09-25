@@ -6,6 +6,8 @@ import type { PrismaClient } from '@prisma/client';
 import type { Env } from '../config/env.js';
 import { installErrorHandling } from '../lib/fastify-errors.js';
 import prismaPlugin from '../plugins/prisma.js';
+import adminAuthPlugin from './plugins/admin-auth.js';
+import adminAuthRoutes from './auth/admin-auth.routes.js';
 
 export interface BuildAdminAppOptions {
   env: Env;
@@ -41,8 +43,13 @@ export async function buildAdminApp(
       level: env.LOG_LEVEL,
       redact: {
         // Nothing that authenticates an administrator may reach the log files.
-        // The login body joins this list with the route that reads it.
-        paths: ['req.headers.authorization'],
+        // The one-time code is listed too: it is useless thirty seconds later,
+        // but a log that prints it prints the pattern of the secret behind it.
+        paths: [
+          'req.headers.authorization',
+          'req.body.password',
+          'req.body.totp',
+        ],
         censor: '[redacted]',
       },
     },
@@ -78,6 +85,8 @@ export async function buildAdminApp(
     client: options.prismaClient,
   });
 
+  await app.register(adminAuthPlugin);
+
   // Outside `/admin`, like the product API keeps `/health` outside `/api/v1`:
   // Docker polls it, and it says nothing a caller could not guess.
   app.get('/health', async () => {
@@ -88,6 +97,7 @@ export async function buildAdminApp(
   // Routes live under `/admin` so the front proxies one prefix and the logs
   // say which API answered. No `/v1`: this API and its front ship from the
   // same repository, in the same breath, and never need to disagree.
+  await app.register(adminAuthRoutes, { prefix: '/admin/auth' });
 
   return app;
 }

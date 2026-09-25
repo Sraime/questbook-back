@@ -1,6 +1,6 @@
-/// Errors thrown by services and translated into a JSON response by the
-/// central error handler in `app.ts`. Anything else is a bug and becomes a 500
-/// without leaking its message to the client.
+/// Errors thrown by services and translated into a JSON response by
+/// `installErrorHandling`, which both APIs share. Anything else is a bug and
+/// becomes a 500 without leaking its message to the client.
 export class AppError extends Error {
   constructor(
     readonly statusCode: number,

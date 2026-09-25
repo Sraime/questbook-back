@@ -40,11 +40,18 @@ src/
 ├── index.ts                  point d'entrée : charge la config, démarre le serveur
 ├── app.ts                    construction de l'instance Fastify (plugins, routes, erreurs)
 ├── admin.ts                  point d'entrée du backoffice — voir plus bas
-├── admin/app.ts              la seconde instance Fastify, celle de l'administration
+├── admin/
+│   ├── app.ts                la seconde instance Fastify, celle de l'administration
+│   ├── audit.ts              `recordAudit` : ce que l'administration a fait
+│   ├── auth/                 connexion par mot de passe et TOTP
+│   └── plugins/admin-auth.ts `app.requireAdmin`, la garde du backoffice
 ├── config/env.ts             validation zod des variables d'environnement
 ├── lib/
 │   ├── errors.ts             AppError + helpers (badRequest, notFound, conflict…)
 │   ├── fastify-errors.ts     le gestionnaire d'erreurs, partagé par les deux API
+│   ├── tokens.ts             jetons opaques et leur empreinte SHA-256
+│   ├── password.ts           hachage scrypt, pour les seuls comptes d'administration
+│   ├── totp.ts               second facteur RFC 6238
 │   ├── email-sender.ts       interface EmailSender + implémentation Resend
 │   └── push-sender.ts        interface PushSender + implémentation FCM HTTP v1
 ├── plugins/
@@ -126,6 +133,9 @@ garde une identité unique sur tous les appareils, sans table de correspondance.
 | `notifications`       | Historique consultable dans l'app                                 |
 | `reports`             | Signalements, avec l'instantané du contenu au moment du geste     |
 | `user_blocks`         | Qui a bloqué qui, à sens unique                                   |
+| `admin_users`         | Les comptes du [backoffice](#le-backoffice). Aucun lien vers `users` |
+| `admin_sessions`      | Sessions d'administration, jeton stocké **haché**, révocables     |
+| `admin_audit_log`     | Ce que l'administration a fait, et les tentatives pour y entrer   |
 
 Les champs des personnages reproduisent exactement les modèles Freezed de l'app
 (`Character`, `CharacterStat`, `CharacterResource`, `InventoryItem`). Les
@@ -365,6 +375,100 @@ conteneurs qui l'exécutent au même démarrage se disputent le verrou de Prisma
 Le service `admin` court-circuite donc ce point d'entrée (`entrypoint: node`)
 et attend que l'API soit saine, ce qui garantit que les migrations sont déjà
 passées.
+
+### La connexion
+
+Le tunnel prouve qu'une machine a la clé du VPS. Il ne dit pas qui est devant
+le clavier, et un portable qui change de mains emporte la clé avec lui. Le
+backoffice a donc sa propre ouverture de session, sans aucun rapport avec celle
+des joueurs.
+
+| Méthode  | Route                  | Description                               |
+| -------- | ---------------------- | ----------------------------------------- |
+| `POST`   | `/admin/auth/session`  | `{ login, password, totp }` → jeton (201) |
+| `DELETE` | `/admin/auth/session`  | Referme la session courante (204)         |
+| `GET`    | `/admin/auth/me`       | Le compte connecté                        |
+
+**Pas de Google ici.** Un joueur passe par un fournisseur tiers parce qu'une
+table se partage et que chacun doit être reconnaissable des autres. Un
+administrateur n'a personne à qui se présenter : faire dépendre l'accès au
+backoffice d'un service extérieur n'apporterait rien et exposerait une surface
+OAuth de plus.
+
+`admin_users` n'a d'ailleurs **aucune relation vers `users`** : un
+administrateur n'est pas un joueur avec un drapeau. Les deux populations n'ont
+ni la même porte, ni la même façon de prouver qui elles sont, et les mélanger
+ferait qu'une faille dans la connexion des joueurs deviendrait une faille dans
+l'administration.
+
+#### Deux primitives écrites à la main, et pourquoi
+
+- **`scrypt` plutôt qu'argon2.** Argon2 est un module natif à compiler dans
+  l'image Docker, et l'écart entre les deux est théorique pour une connexion
+  limitée en débit, verrouillée après cinq échecs et joignable par un seul
+  tunnel. `scrypt` est dans la bibliothèque standard. Les paramètres voyagent
+  dans l'empreinte, donc les relever plus tard n'invalidera pas l'existant.
+- **TOTP sur `node:crypto`.** Un HMAC, un compteur et un modulo. C'est le parti
+  pris d'`apple-verifier.ts`, qui vérifie une signature RS256 à la main plutôt
+  que de dépendre d'une bibliothèque JWT entière. Les **vecteurs de référence
+  de la RFC 6238** sont dans la suite de tests : c'est ce qui rend le choix
+  défendable.
+
+#### Ce qui freine une attaque
+
+- **Une seule réponse à tous les refus**, `401 Identifiants invalides`. Dire
+  laquelle des deux moitiés est fausse diviserait par deux le travail de
+  deviner l'autre, et dire que le login existe nommerait le compte à attaquer.
+  Un login inconnu est même vérifié contre une empreinte leurre, pour qu'il
+  coûte le même temps qu'un login connu.
+- **Verrouillage** après cinq échecs consécutifs, quinze minutes.
+- **Un budget de requêtes propre à la connexion**, dix par cinq minutes, bien
+  en dessous de celui de l'application. Il couvre ce qu'aucun verrou par compte
+  ne voit : un même mot de passe essayé sur beaucoup de logins.
+- **Un code TOTP ne sert qu'une fois.** Il reste valable ses trente secondes,
+  donc qui l'a lu par-dessus l'épaule pourrait le rejouer ; `last_totp_step`
+  l'en empêche.
+
+#### La session
+
+Un **jeton opaque haché** en base, sur le modèle des `refresh_tokens` et des
+jetons d'invitation, plutôt qu'un JWT. La raison est précise : un backoffice
+doit pouvoir être déconnecté à distance, ce qu'un jeton que le serveur ne
+relit jamais ne permet pas.
+
+Trente minutes, **glissantes** : chaque requête repousse l'échéance, si bien
+qu'un poste laissé seul se referme et qu'une soirée de modération ne se fait
+pas interrompre au milieu d'un dossier.
+
+#### Le journal d'audit
+
+`admin_audit_log` enregistre ce que l'administration a fait. C'est le seul
+composant du produit capable de lire les données de tout le monde et d'effacer
+le compte de quelqu'un : la trace n'est pas une option.
+
+`recordAudit` prend un client Prisma **ou une transaction ouverte**, et les
+appelants écrivent leur ligne dans la transaction de l'action qu'elle
+journalise — comme le font déjà les notifications. Un journal écrit après coup
+manque précisément les cas où il servirait, ceux qui ont échoué en chemin.
+
+`admin_id` est nullable : une tentative sur un login inconnu mérite sa ligne
+autant qu'une réussite, et c'est même la plus intéressante des deux. Aucun
+secret n'y entre, et un test lit toutes les lignes que la connexion peut
+produire pour s'en assurer.
+
+### Créer un compte
+
+Il n'y a pas de route d'inscription : un backoffice qui en ouvrirait une
+donnerait à Internet le formulaire qu'on cherche justement à lui cacher.
+
+```bash
+npx tsx scripts/create-admin.ts robin            # nouveau compte
+npx tsx scripts/create-admin.ts robin --reset    # même login, tout neuf
+```
+
+Le script demande le mot de passe deux fois sans l'afficher, puis imprime une
+URI `otpauth://` à scanner. **Elle ne se réaffiche pas** : la base ne garde que
+de quoi vérifier un code, et le secret perdu se remplace par un `--reset`.
 
 ### En local
 
@@ -1076,12 +1180,19 @@ dehors. UFW n'a donc besoin que de :
 
 ## Tests
 
-217 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
+247 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
 des doublures pour Google, Apple, Resend et FCM, et une vraie base PostgreSQL —
 plus quatre cas dédiés à la minimisation des emails (JWT, membres de table,
-joueur sans nom, 404), et cinq qui épinglent la séparation du
-[backoffice](#le-backoffice) : les deux API ne portent pas les routes l'une de
-l'autre, et celle d'administration n'autorise aucune origine navigateur.
+joueur sans nom, 404).
+
+Le [backoffice](#le-backoffice) en occupe trente-cinq. Cinq épinglent la
+séparation des deux API — elles ne portent pas les routes l'une de l'autre, et
+celle d'administration n'autorise aucune origine navigateur. Neuf couvrent les
+deux primitives écrites à la main, **dont les vecteurs de référence de la
+RFC 6238** : c'est ce qui rend défendable de ne pas avoir pris de
+bibliothèque. Les vingt et un autres suivent la connexion — même réponse à
+tous les refus, code rejoué, verrouillage, session révoquée, expirée, glissante,
+et le journal d'audit, y compris qu'aucun secret n'y entre jamais.
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d
