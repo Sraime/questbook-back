@@ -271,16 +271,26 @@ describe('deciding a report', () => {
     expect(second.json().resolvedAt).toBe(first.json().resolvedAt);
   });
 
-  /// The two gestures they name do not exist yet, and a back office that let
-  /// someone write "account suspended" without suspending anything would make
-  /// the audit log lie.
-  it('refuses a decision it cannot yet carry out', async () => {
+  /// `suspended` and `deleted` say what was decided; they do not sanction
+  /// anyone by themselves, `/admin/users/:id` does. The two gestures stay
+  /// apart on purpose: an account is often suspended for a cluster of files
+  /// rather than the one on screen, and a file is sometimes closed without
+  /// anybody being sanctioned.
+  it('accepts every decision of the vocabulary, and nothing else', async () => {
     const { reportId } = await aTableWithAReport();
 
-    for (const resolution of ['suspended', 'deleted', 'nawak']) {
+    for (const resolution of ['dismissed', 'warned', 'suspended', 'deleted']) {
+      await prisma.report.update({
+        where: { id: reportId },
+        data: { status: 'open', resolvedAt: null },
+      });
+
       const response = await resolve(reportId, { resolution });
-      expect(response.statusCode, resolution).toBe(400);
+      expect(response.statusCode, resolution).toBe(200);
+      expect(response.json().resolution, resolution).toBe(resolution);
     }
+
+    expect((await resolve(reportId, { resolution: 'nawak' })).statusCode).toBe(400);
   });
 
   it('answers 404 for an unknown file', async () => {

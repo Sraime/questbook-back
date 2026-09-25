@@ -45,6 +45,7 @@ src/
 │   ├── audit.ts              `recordAudit` : ce que l'administration a fait
 │   ├── auth/                 connexion par mot de passe et TOTP
 │   ├── reports/              la file des signalements
+│   ├── users/                suspendre, lever, fermer un compte
 │   └── plugins/admin-auth.ts `app.requireAdmin`, la garde du backoffice
 ├── config/env.ts             validation zod des variables d'environnement
 ├── lib/
@@ -486,11 +487,84 @@ ne déplace pas un consentement. Une ligne d'audit part dans la transaction.
 Consulter la file, en revanche, n'est pas journalisé : c'est le geste ordinaire
 du poste, et une ligne par rafraîchissement noierait celles qui comptent.
 
-> `resolution` n'accepte aujourd'hui que `dismissed` et `warned`. `suspended`
-> et `deleted` manquent volontairement : les gestes qu'ils nomment n'existent
-> pas encore, et laisser écrire « compte suspendu » sans suspendre quoi que ce
-> soit ferait mentir le journal d'audit. Ils arriveront avec la carte qui les
-> rend vrais.
+> `resolution` vaut `dismissed`, `warned`, `suspended` ou `deleted`. Les deux
+> derniers **ne sanctionnent personne par eux-mêmes** : ils disent ce qui a été
+> décidé, la sanction se posant plus bas. Les deux gestes restent séparés à
+> dessein — un compte se suspend souvent pour un faisceau de dossiers, pas pour
+> celui qu'on avait sous les yeux, et un dossier se classe parfois sans que
+> personne ne soit sanctionné.
+
+### Agir sur un compte
+
+| Méthode  | Route                       | Description                            |
+| -------- | --------------------------- | -------------------------------------- |
+| `GET`    | `/admin/users/:id`          | Le compte, et ce qu'une fermeture détruirait |
+| `POST`   | `/admin/users/:id/suspend`  | `{ reason, until? }`                   |
+| `DELETE` | `/admin/users/:id/suspend`  | Lève la suspension                     |
+| `DELETE` | `/admin/users/:id`          | `{ confirmEmail }` — ferme le compte   |
+
+**Suspendre plutôt que supprimer.** Fermer est irréversible et emporte les
+tables que le compte animait : la bonne réponse à quelqu'un qui n'a rien à
+faire là, une réponse disproportionnée à un titre de séance grossier.
+
+`suspended_until` nul veut dire indéfiniment. Une suspension datée **expire
+d'elle-même**, relue à chaque contrôle plutôt que balayée par une tâche de
+fond : il n'y a pas d'ordonnanceur ici, et une colonne que personne ne nettoie
+garderait quelqu'un dehors pour toujours.
+
+#### Elle mord à quatre endroits
+
+C'est le cœur de la chose. Une mesure qui ne mord qu'à trois des quatre est une
+mesure qu'on contourne, et le contournement n'est jamais celui qu'on
+surveillait.
+
+| Où | Pourquoi |
+| --- | --- |
+| `app.authenticate` | Le jeton d'accès déjà en main vaut encore un quart d'heure. |
+| `POST /auth/google` | Se reconnecter ne doit pas contourner la mesure. |
+| `POST /auth/apple` | Idem, par l'autre porte. |
+| `POST /auth/refresh` | Pour le jeton émis entre-temps, que la révocation rate. |
+
+Suspendre révoque au passage les jetons de rafraîchissement du compte, dans la
+même transaction. Ce n'est pas suffisant pour autant : un jeton émis juste
+avant survivrait, d'où le quatrième contrôle.
+
+Le prix est **une lecture par clé primaire à chaque requête authentifiée**, là
+où la garde ne touchait pas la base. C'est ce que coûte une suspension qui
+prend effet tout de suite plutôt que dans quinze minutes.
+
+#### Ce que le joueur reçoit
+
+`403` avec un code nommé, là où le reste de l'API préfère la discrétion :
+
+```json
+{
+  "error": {
+    "code": "ACCOUNT_SUSPENDED",
+    "message": "Ce compte est suspendu.",
+    "details": { "reason": "…", "until": "2026-09-26T20:39:16.708Z" }
+  }
+}
+```
+
+Un `404` n'aurait aucun sens ici : on parle à la personne même que la mesure
+vise, et la laisser croire à une panne ne ferait que la faire revenir dix fois.
+Le motif voyage parce qu'elle est censée le lire — c'est aussi pourquoi il est
+exigé : une sanction sans motif est une sanction qu'on ne peut pas contester.
+
+#### Fermer un compte
+
+C'est le seul endroit du produit où un tiers détruit les données de quelqu'un
+d'autre, et la cascade emporte les tables qu'il animait — `GameTable.ownerId`
+est en cascade, une table sans MJ étant une salle morte.
+
+L'appelant doit donc **recopier l'adresse du compte**, que `GET
+/admin/users/:id` vient de lui montrer avec le nombre de tables en jeu. C'est
+ce qui sépare une décision d'un faux mouvement de souris.
+
+La ligne d'audit est écrite **avant** la suppression et hors de sa transaction :
+`admin_audit_log` ne pointe pas vers `users`, mais une trace qui disparaîtrait
+avec ce qu'elle trace ne vaudrait rien.
 
 ### Créer un compte
 
@@ -1216,12 +1290,12 @@ dehors. UFW n'a donc besoin que de :
 
 ## Tests
 
-262 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
+282 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
 des doublures pour Google, Apple, Resend et FCM, et une vraie base PostgreSQL —
 plus quatre cas dédiés à la minimisation des emails (JWT, membres de table,
 joueur sans nom, 404).
 
-Le [backoffice](#le-backoffice) en occupe cinquante. Cinq épinglent la
+Le [backoffice](#le-backoffice) en occupe soixante-dix. Cinq épinglent la
 séparation des deux API — elles ne portent pas les routes l'une de l'autre, et
 celle d'administration n'autorise aucune origine navigateur. Neuf couvrent les
 deux primitives écrites à la main, **dont les vecteurs de référence de la
@@ -1230,11 +1304,17 @@ bibliothèque. Vingt et un suivent la connexion — même réponse à tous les r
 code rejoué, verrouillage, session révoquée, expirée, glissante, et le journal
 d'audit, y compris qu'aucun secret n'y entre jamais.
 
-Les quinze derniers suivent la file des signalements, et **les dossiers y
-naissent par l'API du produit** plutôt que fabriqués à la main : c'est le seul
-moyen que la file lise ce qu'un joueur dépose vraiment. L'un d'eux renomme la
-table après coup et vérifie que le dossier dit toujours ce qu'elle disait —
-c'est toute la raison d'être de l'instantané.
+Quinze suivent la file des signalements, et **les dossiers y naissent par l'API
+du produit** plutôt que fabriqués à la main : c'est le seul moyen que la file
+lise ce qu'un joueur dépose vraiment. L'un d'eux renomme la table après coup et
+vérifie que le dossier dit toujours ce qu'elle disait — c'est toute la raison
+d'être de l'instantané.
+
+Les vingt derniers portent les sanctions, et **quatre d'entre eux valent pour
+toute la carte** : ils vérifient qu'une suspension mord au jeton d'accès déjà
+en main, à la reconnexion Google, à la reconnexion Apple et au
+rafraîchissement. Un cinquième pose la suspension en base sans révoquer les
+jetons, pour couvrir seul le cas que la révocation rate.
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d

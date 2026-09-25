@@ -39,6 +39,16 @@ model User {
   /// suivante sans deviner qui avait vu quoi.
   termsAcceptedAt DateTime? @map("terms_accepted_at")
 
+  /// Quand l'administration a ferme la porte a ce compte, et jusqu'a quand.
+  ///
+  /// Nul dans `suspendedUntil` veut dire indefiniment : une suspension datee
+  /// expire d'elle-meme, lue a chaque controle, sans tache de fond pour la
+  /// lever. Le motif est **affiche au joueur**, donc ecrit en francais et
+  /// accentue — il le lira sur l'ecran qui lui apprend la nouvelle.
+  suspendedAt      DateTime? @map("suspended_at")
+  suspendedUntil   DateTime? @map("suspended_until")
+  suspensionReason String?   @map("suspension_reason")
+
   characters    Character[]
   refreshTokens RefreshToken[]
 
