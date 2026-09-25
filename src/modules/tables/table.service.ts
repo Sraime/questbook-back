@@ -1,6 +1,6 @@
-import { createHash, randomBytes } from 'node:crypto';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { badRequest, conflict, forbidden, notFound, tooManyRequests } from '../../lib/errors.js';
+import { hashToken, randomToken } from '../../lib/tokens.js';
 import type { EmailSender } from '../../lib/email-sender.js';
 import type {
   NotificationDraft,
@@ -355,7 +355,7 @@ export class TableService {
       await this.assertInviteQuota(userId);
     }
 
-    const token = randomBytes(48).toString('base64url');
+    const token = randomToken();
     const expiresAt = new Date(
       Date.now() + this.options.invitationTtlDays * 24 * 60 * 60 * 1000,
     );
@@ -645,10 +645,6 @@ export class TableService {
       nextSessionAt: row.sessions[0]?.startsAt.toISOString() ?? null,
     };
   }
-}
-
-function hashToken(token: string): string {
-  return createHash('sha256').update(token).digest('hex');
 }
 
 type InvitationRow = Prisma.TableInvitationGetPayload<{

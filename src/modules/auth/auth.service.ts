@@ -1,6 +1,6 @@
-import { createHash, randomBytes } from 'node:crypto';
 import type { PrismaClient, User } from '@prisma/client';
 import { badRequest, conflict, unauthorized } from '../../lib/errors.js';
+import { hashToken, randomToken } from '../../lib/tokens.js';
 import type { AppleVerifier } from './apple-verifier.js';
 import type { GoogleVerifier } from './google-verifier.js';
 import { grantStarterScenarios } from '../scenarios/scenario.service.js';
@@ -40,11 +40,6 @@ export interface AuthServiceOptions {
   accessTokenTtl: string;
   refreshTokenTtlDays: number;
 }
-
-/// Refresh tokens are opaque random strings; only their SHA-256 digest is
-/// persisted, so a dump of `refresh_tokens` cannot be replayed.
-const hashToken = (token: string): string =>
-  createHash('sha256').update(token).digest('hex');
 
 export const toPublicUser = (user: User): PublicUser => ({
   id: user.id,
@@ -255,7 +250,7 @@ export class AuthService {
   }
 
   private async issueTokens(user: User): Promise<AuthTokens> {
-    const refreshToken = randomBytes(48).toString('base64url');
+    const refreshToken = randomToken();
     const expiresAt = new Date(
       Date.now() + this.options.refreshTokenTtlDays * 24 * 60 * 60 * 1000,
     );
