@@ -12,7 +12,7 @@
 /// ailleurs qu'on ne le croit, et rien a l'ecran ne le dirait.
 import { existsSync } from 'node:fs';
 import { PrismaClient } from '@prisma/client';
-import { currentStep, totpCode, TOTP_STEP_SECONDS } from '../src/lib/totp.js';
+import { currentStep, totpCode, TOTP_STEP_SECONDS } from '../../lib/totp.js';
 
 if (existsSync('.env')) {
   process.loadEnvFile('.env');
