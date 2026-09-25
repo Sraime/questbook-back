@@ -17,6 +17,10 @@ const adminUserRoutes: FastifyPluginAsync = async (fastify) => {
 
   app.addHook('preHandler', app.requireAdmin);
 
+  // Avant `/:id`, sinon `suspended` serait lu comme un identifiant — et
+  // rejete par le `uuid()` du schema, ce qui ferait un 400 obscur.
+  app.get('/suspended', async () => service.listSuspended());
+
   app.get('/:id', { schema: { params: userIdParamsSchema } }, async (request) =>
     service.detail(request.params.id),
   );

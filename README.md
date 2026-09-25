@@ -500,6 +500,7 @@ du poste, et une ligne par rafraîchissement noierait celles qui comptent.
 
 | Méthode  | Route                       | Description                            |
 | -------- | --------------------------- | -------------------------------------- |
+| `GET`    | `/admin/users/suspended`    | Les mesures encore actives             |
 | `GET`    | `/admin/users/:id`          | Le compte, et ce qu'une fermeture détruirait |
 | `POST`   | `/admin/users/:id/suspend`  | `{ reason, until? }`                   |
 | `DELETE` | `/admin/users/:id/suspend`  | Lève la suspension                     |
@@ -513,6 +514,19 @@ faire là, une réponse disproportionnée à un titre de séance grossier.
 d'elle-même**, relue à chaque contrôle plutôt que balayée par une tâche de
 fond : il n'y a pas d'ordonnanceur ici, et une colonne que personne ne nettoie
 garderait quelqu'un dehors pour toujours.
+
+C'est ce qui rend `GET /admin/users/suspended` moins anodin qu'il n'y paraît :
+**filtrer sur la seule présence de `suspended_at` listerait des comptes déjà
+revenus**, puisque rien ne l'efface à l'échéance. La route applique donc le
+même `isSuspended` que les quatre contrôles.
+
+L'ordre y porte le sens : **les indéfinies d'abord**, seules à attendre une
+décision humaine — sans écran qui les rappelle, elles deviennent une exclusion
+définitive par oubli plutôt que par décision — puis les datées, par échéance la
+plus proche.
+
+Cette route existe parce que la file des signalements ne répond pas à la
+question : une fois le dossier classé, le compte suspendu sort de l'écran.
 
 #### Elle mord à quatre endroits
 

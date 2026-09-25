@@ -3,13 +3,22 @@ import { api, forgetToken, readToken, SessionExpired } from './api';
 import { ReportDetail } from './ReportDetail';
 import { ReportQueue } from './ReportQueue';
 import { SignIn } from './SignIn';
+import { SuspendedList } from './SuspendedList';
 import type { Admin, ReportDetail as Report, ReportPage } from './types';
 
 type Status = 'open' | 'resolved';
 
+/// Deux travaux distincts, donc deux vues.
+///
+/// Examiner un dossier et passer en revue les mesures en cours ne se font ni
+/// au meme moment ni dans le meme etat d'esprit : les melanger dans la meme
+/// colonne ferait de la seconde un onglet qu'on n'ouvre jamais.
+type View = 'reports' | 'suspended';
+
 export function App() {
   const [admin, setAdmin] = useState<Admin | null>(null);
   const [booting, setBooting] = useState(true);
+  const [view, setView] = useState<View>('reports');
   const [status, setStatus] = useState<Status>('open');
   const [page, setPage] = useState<ReportPage | null>(null);
   const [selected, setSelected] = useState<Report | null>(null);
@@ -58,9 +67,9 @@ export function App() {
   }, [status, handle]);
 
   useEffect(() => {
-    if (admin === null) return;
+    if (admin === null || view !== 'reports') return;
     void reload();
-  }, [admin, reload]);
+  }, [admin, view, reload]);
 
   const open = async (id: string) => {
     try {
@@ -93,6 +102,22 @@ export function App() {
       <header className="top">
         <strong>Questbook</strong>
         <span className="muted">administration</span>
+
+        <nav className="views">
+          <button
+            className={view === 'reports' ? 'active' : ''}
+            onClick={() => setView('reports')}
+          >
+            Signalements
+          </button>
+          <button
+            className={view === 'suspended' ? 'active' : ''}
+            onClick={() => setView('suspended')}
+          >
+            Comptes suspendus
+          </button>
+        </nav>
+
         <span className="spacer" />
         <span className="muted">{admin.login}</span>
         <button className="link" onClick={signOut}>
@@ -109,6 +134,9 @@ export function App() {
         </div>
       )}
 
+      {view === 'suspended' && <SuspendedList onError={handle} />}
+
+      {view === 'reports' && (
       <div className="columns">
         <ReportQueue
           page={page}
@@ -136,6 +164,7 @@ export function App() {
           />
         )}
       </div>
+      )}
     </div>
   );
 }

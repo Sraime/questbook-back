@@ -27,6 +27,32 @@ export function age(iso: string, now: Date = new Date()): { label: string; late:
   return { label: `il y a ${Math.floor(hours / 24)} j`, late: true };
 }
 
+/// Ce qu'il reste a courir, et s'il faut y regarder.
+///
+/// Une suspension sans terme ne s'eteint pas toute seule : personne ne la
+/// reverra jamais si cet ecran ne la signale pas, et elle deviendrait une
+/// exclusion definitive par oubli plutot que par decision. D'ou `watch`.
+export function remaining(
+  until: string | null,
+  now: Date = new Date(),
+): { label: string; watch: boolean } {
+  if (until === null) {
+    return { label: 'Indéfiniment', watch: true };
+  }
+
+  const hours = Math.floor((new Date(until).getTime() - now.getTime()) / 3_600_000);
+
+  if (hours < 1) {
+    return { label: 'Se termine dans moins d’une heure', watch: false };
+  }
+
+  if (hours < 48) {
+    return { label: `Encore ${hours} h`, watch: false };
+  }
+
+  return { label: `Encore ${Math.floor(hours / 24)} j`, watch: false };
+}
+
 const contentLabels: Record<string, string> = {
   user: 'Un joueur',
   table: 'Une table',

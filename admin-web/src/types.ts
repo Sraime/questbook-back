@@ -37,6 +37,17 @@ export interface ReportPage {
   total: number;
 }
 
+/// Une mesure encore active. Le serveur exclut celles qui ont expire : une
+/// suspension datee s'eteint d'elle-meme et le compte est deja revenu.
+export interface SuspendedUser {
+  id: string;
+  email: string;
+  displayName: string | null;
+  suspendedAt: string;
+  suspendedUntil: string | null;
+  suspensionReason: string | null;
+}
+
 export interface UserDetail {
   id: string;
   email: string;

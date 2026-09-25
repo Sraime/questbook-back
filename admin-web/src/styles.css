@@ -177,6 +177,86 @@ textarea {
   min-height: 0;
 }
 
+.views {
+  display: flex;
+  gap: 0.2rem;
+  margin-left: 1rem;
+}
+.views button {
+  border: none;
+  background: none;
+  color: var(--doux);
+  padding: 0.35rem 0.7rem;
+  border-radius: var(--rayon);
+}
+.views button.active {
+  color: var(--texte);
+  background: var(--panneau-clair);
+}
+
+/* --- Les comptes suspendus ------------------------------------------------ */
+
+.suspended {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.5rem;
+  /* Une colonne lisible plutot que toute la largeur : chaque ligne se lit en
+     entier, motif compris, et la liste reste une liste. */
+  max-width: 760px;
+  width: 100%;
+  margin: 0 auto;
+}
+.suspended h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--doux);
+  margin: 0 0 1rem;
+}
+.suspended ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.suspended li {
+  background: var(--panneau);
+  border: 1px solid var(--bord);
+  border-radius: 12px;
+  padding: 1rem 1.2rem;
+  margin-bottom: 0.8rem;
+}
+.suspended .head {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+.suspended .who {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.suspended .term {
+  margin-left: auto;
+  white-space: nowrap;
+  color: var(--doux);
+  font-size: 0.85rem;
+}
+/* Une mesure sans terme n'expire pas : c'est la seule qui attende une
+   decision, et le seul endroit de cet ecran qui reclame le regard. */
+.suspended .term.watch {
+  color: var(--accent);
+  font-weight: 600;
+}
+.suspended .muted {
+  font-size: 0.85rem;
+  margin: 0.4rem 0 0.8rem;
+}
+.suspended .confirm {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
 /* --- La file ------------------------------------------------------------- */
 
 .queue {
