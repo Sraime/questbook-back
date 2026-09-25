@@ -13,6 +13,7 @@
 import { existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { PrismaClient } from '@prisma/client';
+import { toString } from 'qrcode';
 import { hashPassword } from '../src/lib/password.js';
 import { generateTotpSecret, totpProvisioningUri } from '../src/lib/totp.js';
 
@@ -78,14 +79,26 @@ const main = async (): Promise<void> => {
     },
   });
 
+  const uri = totpProvisioningUri(totpSecret, login, 'Questbook');
+
   console.log('');
   console.log(existing ? `Compte "${login}" reinitialise.` : `Compte "${login}" cree.`);
   console.log('');
-  console.log('A scanner dans une application d\'authentification, maintenant :');
+  console.log("A scanner dans une application d'authentification, maintenant :");
   console.log('');
-  console.log(`  ${totpProvisioningUri(totpSecret, login, 'Questbook')}`);
+
+  // Le QR plutot que la seule URI : le secret doit passer dans un telephone,
+  // et recopier trente-deux caracteres en base32 a la main est le genre de
+  // geste qu'on rate deux fois avant d'abandonner.
+  console.log(await toString(uri, { type: 'terminal', small: true }));
+
+  console.log('  Si le QR passe mal, saisie manuelle de la cle :');
   console.log('');
-  console.log('Cette ligne ne sera pas reaffichee.');
+  console.log(`    compte : Questbook:${login}`);
+  console.log(`    cle    : ${totpSecret}`);
+  console.log(`    type   : par temps (TOTP), 6 chiffres, 30 secondes`);
+  console.log('');
+  console.log('Rien de tout ceci ne sera reaffiche.');
 };
 
 /// Lit une saisie sans l'afficher. `readline` n'offre rien pour cela, d'ou le
