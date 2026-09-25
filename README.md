@@ -626,6 +626,25 @@ npm run dev:admin            # http://localhost:4000
 curl http://localhost:4000/health
 ```
 
+Le compte se cree a la main, il n'y a pas de route d'inscription :
+
+```bash
+npx tsx scripts/create-admin.ts robin           # ou --reset, si le secret est perdu
+```
+
+Le script demande un mot de passe — **sans rien afficher pendant la frappe**,
+pas meme des asterisques — puis imprime une URI `otpauth://` a donner une fois
+a une application d'authentification. Elle ne sera pas reaffichee.
+
+Pour essayer un ecran sans sortir son telephone a chaque rechargement :
+
+```bash
+npx tsx scripts/totp-code.ts robin              # le code courant, en clair
+```
+
+Il refuse de tourner sur une base qui n'est pas locale : il divulgue un second
+facteur, et `DATABASE_URL` peut pointer ailleurs qu'on ne le croit.
+
 ---
 
 ## Endpoints
