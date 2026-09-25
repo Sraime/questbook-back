@@ -13,6 +13,7 @@
 import { existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { PrismaClient } from '@prisma/client';
+import { toString } from 'qrcode';
 import { hashPassword } from '../src/lib/password.js';
 import { generateTotpSecret, totpProvisioningUri } from '../src/lib/totp.js';
 
@@ -44,6 +45,19 @@ const main = async (): Promise<void> => {
     process.exitCode = 1;
     return;
   }
+
+  // Annonce l'invisibilite de la frappe, et surtout : se termine par un saut
+  // de ligne. Les invites qui suivent n'en ont pas, et un terminal ne rend pas
+  // toujours une ligne incomplete — on croit alors le script fige, on l'arrete,
+  // et on recommence.
+  console.log('');
+  console.log(`Choisir un mot de passe, ${MIN_PASSWORD_LENGTH} caracteres au moins.`);
+  console.log(
+    process.stdin.isTTY
+      ? 'La frappe reste invisible : ni caracteres, ni asterisques.'
+      : "Ce terminal n'est pas un TTY : la frappe s'affichera en clair.",
+  );
+  console.log('');
 
   const password = await askHidden('Mot de passe : ');
   const confirmation = await askHidden('Confirmer     : ');
@@ -78,27 +92,44 @@ const main = async (): Promise<void> => {
     },
   });
 
+  const uri = totpProvisioningUri(totpSecret, login, 'Questbook');
+
   console.log('');
   console.log(existing ? `Compte "${login}" reinitialise.` : `Compte "${login}" cree.`);
   console.log('');
-  console.log('A scanner dans une application d\'authentification, maintenant :');
+  console.log("A scanner dans une application d'authentification, maintenant :");
   console.log('');
-  console.log(`  ${totpProvisioningUri(totpSecret, login, 'Questbook')}`);
+
+  // Le QR plutot que la seule URI : le secret doit passer dans un telephone,
+  // et recopier trente-deux caracteres en base32 a la main est le genre de
+  // geste qu'on rate deux fois avant d'abandonner.
+  console.log(await toString(uri, { type: 'terminal', small: true }));
+
+  console.log('  Si le QR passe mal, saisie manuelle de la cle :');
   console.log('');
-  console.log('Cette ligne ne sera pas reaffichee.');
+  console.log(`    compte : Questbook:${login}`);
+  console.log(`    cle    : ${totpSecret}`);
+  console.log(`    type   : par temps (TOTP), 6 chiffres, 30 secondes`);
+  console.log('');
+  console.log('Rien de tout ceci ne sera reaffiche.');
 };
 
 /// Lit une saisie sans l'afficher. `readline` n'offre rien pour cela, d'ou le
 /// masquage du flux de sortie pendant la question.
 ///
-/// Hors terminal — un `echo | npx tsx` —, il n'y a rien a masquer et la ruse
-/// ci-dessous ne marche pas : la seconde question ne se resoudrait jamais,
-/// puisque l'entree est deja fermee, et le script s'eteindrait sans un mot.
-/// Les lignes sont donc lues d'un bloc dans ce cas.
+/// Encore faut-il un vrai terminal. `npx` lance node a travers un `.cmd` sous
+/// Windows, et l'entree cesse alors d'etre un TTY : `isTTY` est indefini, le
+/// masquage n'a plus de prise, et il reste a lire des lignes comme elles
+/// viennent — d'un `echo |` ou d'un clavier, la difference ne se voit pas
+/// d'ici.
+///
+/// **Ne pas y lire le flux jusqu'a sa fin.** C'est ce que faisait ce script, et
+/// une saisie au clavier ne finit jamais : chaque Entree ajoutait une ligne a
+/// une attente qui ne se resolvait pas, et l'on croyait le script gele.
 function askHidden(prompt: string): Promise<string> {
   process.stdout.write(prompt);
 
-  return process.stdin.isTTY ? askFromTerminal() : askFromPipe();
+  return process.stdin.isTTY ? askFromTerminal() : askLine();
 }
 
 function askFromTerminal(): Promise<string> {
@@ -124,25 +155,58 @@ function askFromTerminal(): Promise<string> {
   });
 }
 
-/// Les lignes de l'entree, lues une fois et distribuees dans l'ordre.
-let pipedLines: string[] | null = null;
+/// Une seule interface pour tout le script : deux `createInterface` sur la
+/// meme entree se volent les lignes, et la seconde question resterait sans
+/// reponse.
+let reader: ReturnType<typeof createInterface> | null = null;
 
-async function askFromPipe(): Promise<string> {
-  if (pipedLines === null) {
-    const chunks: Buffer[] = [];
-    for await (const chunk of process.stdin) {
-      chunks.push(Buffer.from(chunk));
-    }
-    pipedLines = Buffer.concat(chunks).toString('utf8').split(/\r?\n/);
+/// Les lignes arrivees avant qu'on ne les demande. Un `echo a`nb |` livre les
+/// deux d'un coup, souvent avant le premier `askLine`.
+const arrived: string[] = [];
+const waiting: ((line: string) => void)[] = [];
+let inputEnded = false;
+
+function askLine(): Promise<string> {
+  if (reader === null) {
+    reader = createInterface({ input: process.stdin, terminal: false });
+
+    reader.on('line', (line) => {
+      const next = waiting.shift();
+      if (next) {
+        next(line);
+      } else {
+        arrived.push(line);
+      }
+    });
+
+    reader.on('close', () => {
+      inputEnded = true;
+      // Debloque ce qui attendait encore, plutot que de laisser le script
+      // pendre sur une entree fermee.
+      for (const resolve of waiting.splice(0)) {
+        resolve('');
+      }
+    });
   }
 
-  const line = pipedLines.shift();
-  if (line === undefined) {
-    throw new Error('Entree trop courte : un mot de passe et sa confirmation sont attendus.');
+  const ready = arrived.shift();
+  if (ready !== undefined) {
+    process.stdout.write('\n');
+    return Promise.resolve(ready);
   }
 
-  process.stdout.write('\n');
-  return line;
+  if (inputEnded) {
+    return Promise.reject(
+      new Error('Entree trop courte : un mot de passe et sa confirmation sont attendus.'),
+    );
+  }
+
+  return new Promise((resolve) => {
+    waiting.push((line) => {
+      process.stdout.write('\n');
+      resolve(line);
+    });
+  });
 }
 
 main()
@@ -150,4 +214,7 @@ main()
     console.error(error);
     process.exitCode = 1;
   })
-  .finally(() => prisma.$disconnect());
+  .finally(() => {
+    reader?.close();
+    return prisma.$disconnect();
+  });

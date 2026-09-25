@@ -19,8 +19,14 @@ export const isSuspended = (user: SuspendableUser, at: Date = new Date()): boole
 /// `403` with a named code, where the rest of the API prefers discretion: a
 /// `404` would be pointless here, since we are talking to the very person the
 /// measure is aimed at, and letting them believe in an outage would only make
-/// them come back ten times. The reason travels because they are meant to read
-/// it, and the app has a screen for exactly that.
+/// them come back ten times.
+///
+/// The reason and the end date travel because they are meant to be read. **No
+/// client displays them yet** — questbook-app#150 — and until it does, a
+/// suspended player is signed out of the app without a word: `/auth/me`
+/// answers `403`, which `restoreSession` treats as a rejected token and
+/// clears. Sending them anyway is deliberate: the server side of the contract
+/// has no reason to wait for the screen that will read it.
 export function suspended(user: SuspendableUser): AppError {
   return new AppError(403, 'ACCOUNT_SUSPENDED', 'Ce compte est suspendu.', {
     reason: user.suspensionReason,

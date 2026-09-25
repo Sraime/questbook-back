@@ -2,6 +2,9 @@ node_modules
 dist
 coverage
 .git
+# Le front du backoffice ne part nulle part : il tourne sur le poste de qui
+# modere, derriere le tunnel. L'image n'a aucune raison de le transporter.
+admin-web
 .env
 .env.*
 !.env.example

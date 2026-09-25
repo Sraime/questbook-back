@@ -48,6 +48,8 @@ src/
 │   ├── users/                suspendre, lever, fermer un compte
 │   └── plugins/admin-auth.ts `app.requireAdmin`, la garde du backoffice
 ├── config/env.ts             validation zod des variables d'environnement
+│
+│  (et, hors de `src/`, `admin-web/` : le front local du backoffice)
 ├── lib/
 │   ├── errors.ts             AppError + helpers (badRequest, notFound, conflict…)
 │   ├── fastify-errors.ts     le gestionnaire d'erreurs, partagé par les deux API
@@ -580,12 +582,68 @@ Le script demande le mot de passe deux fois sans l'afficher, puis imprime une
 URI `otpauth://` à scanner. **Elle ne se réaffiche pas** : la base ne garde que
 de quoi vérifier un code, et le secret perdu se remplace par un `--reset`.
 
+### Le front
+
+`admin-web/`, un projet Vite/React **qui n'est deployé nulle part**. Il tourne
+sur le poste de qui modère, le temps d'une session, et c'est tout ce qu'on lui
+demande : pas d'hébergement, pas de domaine, pas de build à distribuer, et une
+surface d'attaque qui se réduit à un onglet.
+
+```bash
+cd admin-web && npm install   # une fois
+npm run dev                   # http://localhost:5174
+```
+
+Il lui faut l'API d'administration à l'autre bout, **au choix** :
+
+```bash
+npm run dev:admin                              # la base de dev, sans risque
+../questbook-ia/scripts/tunnel-admin.sh        # le VPS, par le tunnel
+```
+
+> ⚠️ Le proxy pointe vers `127.0.0.1:4000` **dans les deux cas**, et rien à
+> l'écran ne dit lequel répond. Se tromper veut dire suspendre un vrai compte
+> en croyant jouer avec des données de dev. C'est pour cela que le script de
+> tunnel refuse de s'ouvrir quand le port est déjà pris, plutôt que de laisser
+> les deux se disputer l'adresse.
+
+Le jeton de session vit dans `sessionStorage`, et pas plus loin. En mémoire
+seulement aurait redemandé un code à chaque rechargement, ce qui pousse à
+garder l'onglet ouvert — l'inverse du but ; `localStorage` survivrait au
+navigateur, ce qui est trop.
+
+Le risque habituel de ce choix, le vol par script injecté, est écarté ici :
+aucune origine tierce ne parle à ce front, et **React échappe tout ce qu'il
+interpole**. Cela compte plus qu'ailleurs — c'est le seul écran du produit qui
+affiche, par construction, du texte écrit par quelqu'un qui cherchait à nuire.
+Jamais de `dangerouslySetInnerHTML` sur un instantané, jamais de `href`
+construit depuis un de ses champs.
+
 ### En local
 
 ```bash
 npm run dev:admin            # http://localhost:4000
 curl http://localhost:4000/health
 ```
+
+Le compte se cree a la main, il n'y a pas de route d'inscription :
+
+```bash
+npx tsx scripts/create-admin.ts robin           # ou --reset, si le secret est perdu
+```
+
+Le script demande un mot de passe — **sans rien afficher pendant la frappe**,
+pas meme des asterisques — puis imprime une URI `otpauth://` a donner une fois
+a une application d'authentification. Elle ne sera pas reaffichee.
+
+Pour essayer un ecran sans sortir son telephone a chaque rechargement :
+
+```bash
+npx tsx scripts/totp-code.ts robin              # le code courant, en clair
+```
+
+Il refuse de tourner sur une base qui n'est pas locale : il divulgue un second
+facteur, et `DATABASE_URL` peut pointer ailleurs qu'on ne le croit.
 
 ---
 
