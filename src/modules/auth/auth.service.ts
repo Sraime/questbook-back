@@ -1,6 +1,7 @@
 import type { PrismaClient, User } from '@prisma/client';
 import { badRequest, conflict, unauthorized } from '../../lib/errors.js';
 import { hashToken, randomToken } from '../../lib/tokens.js';
+import { requireNotSuspended } from './suspension.js';
 import type { AppleVerifier } from './apple-verifier.js';
 import type { GoogleVerifier } from './google-verifier.js';
 import { grantStarterScenarios } from '../scenarios/scenario.service.js';
@@ -78,6 +79,11 @@ export class AuthService {
       },
     });
 
+    // Avant tout le reste : se reconnecter ne doit pas contourner la mesure,
+    // et un compte suspendu n'a ni invitation a reclamer ni scenario a
+    // recevoir.
+    requireNotSuspended(user);
+
     await this.claimInvitations(user.id, user.email);
     await grantStarterScenarios(this.options.prisma, user.id);
 
@@ -107,6 +113,8 @@ export class AuthService {
     });
 
     if (existing) {
+      requireNotSuspended(existing);
+
       const tokens = await this.issueTokens(existing);
       return { ...tokens, user: toPublicUser(existing) };
     }
@@ -160,6 +168,12 @@ export class AuthService {
     if (!stored || stored.revokedAt !== null || stored.expiresAt <= new Date()) {
       throw unauthorized('Refresh token is invalid, expired or already used');
     }
+
+    // Suspendre revoque les jetons du compte, mais un jeton emis entre-temps
+    // ferait vivre la session trente jours de plus. Le controle est donc ici
+    // aussi, et il precede la rotation : un compte suspendu ne repart pas avec
+    // une paire fraiche.
+    requireNotSuspended(stored.user);
 
     await this.options.prisma.refreshToken.update({
       where: { id: stored.id },

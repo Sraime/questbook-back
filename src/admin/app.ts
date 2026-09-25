@@ -9,6 +9,7 @@ import prismaPlugin from '../plugins/prisma.js';
 import adminAuthPlugin from './plugins/admin-auth.js';
 import adminAuthRoutes from './auth/admin-auth.routes.js';
 import adminReportRoutes from './reports/admin-report.routes.js';
+import adminUserRoutes from './users/admin-user.routes.js';
 
 export interface BuildAdminAppOptions {
   env: Env;
@@ -100,6 +101,7 @@ export async function buildAdminApp(
   // same repository, in the same breath, and never need to disagree.
   await app.register(adminAuthRoutes, { prefix: '/admin/auth' });
   await app.register(adminReportRoutes, { prefix: '/admin/reports' });
+  await app.register(adminUserRoutes, { prefix: '/admin/users' });
 
   return app;
 }

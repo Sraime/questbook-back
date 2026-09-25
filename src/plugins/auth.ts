@@ -7,6 +7,7 @@ import { createAppleVerifier } from '../modules/auth/apple-verifier.js';
 import type { AppleVerifier } from '../modules/auth/apple-verifier.js';
 import { createGoogleVerifier } from '../modules/auth/google-verifier.js';
 import type { GoogleVerifier } from '../modules/auth/google-verifier.js';
+import { requireNotSuspended } from '../modules/auth/suspension.js';
 
 declare module '@fastify/jwt' {
   interface FastifyJWT {
@@ -67,6 +68,22 @@ const authPlugin: FastifyPluginAsync<AuthPluginOptions> = async (app, options) =
       // malformed, expired or signed with the wrong key.
       throw unauthorized('Missing or invalid access token');
     }
+
+    // One primary-key lookup per authenticated request, and it buys the fourth
+    // checkpoint of a suspension. Without it the access token already in hand
+    // would keep working for its full quarter of an hour — long enough to send
+    // whatever the measure was meant to stop.
+    const account = await app.prisma.user.findUnique({
+      where: { id: request.user.sub },
+      select: { suspendedAt: true, suspendedUntil: true, suspensionReason: true },
+    });
+
+    if (!account) {
+      // The account was deleted while its token was still valid.
+      throw unauthorized('Missing or invalid access token');
+    }
+
+    requireNotSuspended(account);
   });
 };
 

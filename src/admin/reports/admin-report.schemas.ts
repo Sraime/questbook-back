@@ -2,13 +2,14 @@ import { z } from 'zod';
 
 export const reportStatuses = ['open', 'resolved'] as const;
 
-/// Ce qu'un dossier peut devenir aujourd'hui.
+/// Ce qu'un dossier peut devenir.
 ///
-/// `suspended` et `deleted` manquent volontairement : les gestes qu'ils
-/// nomment n'existent pas encore, et un backoffice qui laisserait ecrire
-/// « compte suspendu » sans suspendre quoi que ce soit ferait mentir le
-/// journal d'audit. Ils arriveront avec la carte qui les rend vrais.
-export const resolutions = ['dismissed', 'warned'] as const;
+/// `suspended` et `deleted` **ne font rien par eux-memes** : ils disent ce qui
+/// a ete decide, la sanction se posant par `/admin/users/:id`. Les deux gestes
+/// restent separes a dessein — un compte se suspend souvent pour un faisceau
+/// de dossiers, pas pour celui qu'on avait sous les yeux, et un dossier se
+/// classe parfois sans que personne ne soit sanctionne.
+export const resolutions = ['dismissed', 'warned', 'suspended', 'deleted'] as const;
 
 export const listReportsQuerySchema = z.object({
   status: z.enum(reportStatuses).default('open'),
