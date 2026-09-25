@@ -44,6 +44,7 @@ src/
 │   ├── app.ts                la seconde instance Fastify, celle de l'administration
 │   ├── audit.ts              `recordAudit` : ce que l'administration a fait
 │   ├── auth/                 connexion par mot de passe et TOTP
+│   ├── reports/              la file des signalements
 │   └── plugins/admin-auth.ts `app.requireAdmin`, la garde du backoffice
 ├── config/env.ts             validation zod des variables d'environnement
 ├── lib/
@@ -131,7 +132,7 @@ garde une identité unique sur tous les appareils, sans table de correspondance.
 | `shop_item_ownerships`| Qui a acheté quoi                                                 |
 | `device_tokens`       | Jetons FCM, un par appareil                                       |
 | `notifications`       | Historique consultable dans l'app                                 |
-| `reports`             | Signalements, avec l'instantané du contenu au moment du geste     |
+| `reports`             | Signalements, leur instantané du contenu, et ce qu'en a décidé le support |
 | `user_blocks`         | Qui a bloqué qui, à sens unique                                   |
 | `admin_users`         | Les comptes du [backoffice](#le-backoffice). Aucun lien vers `users` |
 | `admin_sessions`      | Sessions d'administration, jeton stocké **haché**, révocables     |
@@ -455,6 +456,41 @@ manque précisément les cas où il servirait, ceux qui ont échoué en chemin.
 autant qu'une réussite, et c'est même la plus intéressante des deux. Aucun
 secret n'y entre, et un test lit toutes les lignes que la connexion peut
 produire pour s'en assurer.
+
+### La file des signalements
+
+| Méthode | Route                        | Description                              |
+| ------- | ---------------------------- | ---------------------------------------- |
+| `GET`   | `/admin/reports`             | `?status=open\|resolved`, `limit`, `offset` |
+| `GET`   | `/admin/reports/:id`         | Le dossier complet                       |
+| `POST`  | `/admin/reports/:id/resolve` | `{ resolution, note? }`                  |
+
+`POST /api/v1/reports` enregistrait un signalement et réveillait le support par
+mail ; après quoi, plus rien. Savoir ce qui restait à examiner demandait un
+`psql` sur le VPS, alors que les conditions d'utilisation annoncent un examen
+**sous vingt-quatre heures**. C'est pour tenir cet engagement que cet écran
+existe avant les statistiques et l'administration du contenu.
+
+**Le plus ancien en tête.** La file se lit par son bout le plus urgent, celui
+qui approche des vingt-quatre heures.
+
+Le détail d'un dossier montre ce qui permet de décider, et rien de plus :
+l'instantané et le motif, les deux comptes, et **les autres dossiers visant le
+même compte**. Ce dernier point est le signal le plus utile du lot — deux
+personnes différentes qui signalent la même personne disent quelque chose
+qu'un dossier isolé ne dit pas.
+
+Trancher est **idempotent sans réécrire la date** : un double clic ne déplace
+pas le moment où le dossier a été tranché, exactement comme `POST /auth/terms`
+ne déplace pas un consentement. Une ligne d'audit part dans la transaction.
+Consulter la file, en revanche, n'est pas journalisé : c'est le geste ordinaire
+du poste, et une ligne par rafraîchissement noierait celles qui comptent.
+
+> `resolution` n'accepte aujourd'hui que `dismissed` et `warned`. `suspended`
+> et `deleted` manquent volontairement : les gestes qu'ils nomment n'existent
+> pas encore, et laisser écrire « compte suspendu » sans suspendre quoi que ce
+> soit ferait mentir le journal d'audit. Ils arriveront avec la carte qui les
+> rend vrais.
 
 ### Créer un compte
 
@@ -1180,19 +1216,25 @@ dehors. UFW n'a donc besoin que de :
 
 ## Tests
 
-247 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
+262 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
 des doublures pour Google, Apple, Resend et FCM, et une vraie base PostgreSQL —
 plus quatre cas dédiés à la minimisation des emails (JWT, membres de table,
 joueur sans nom, 404).
 
-Le [backoffice](#le-backoffice) en occupe trente-cinq. Cinq épinglent la
+Le [backoffice](#le-backoffice) en occupe cinquante. Cinq épinglent la
 séparation des deux API — elles ne portent pas les routes l'une de l'autre, et
 celle d'administration n'autorise aucune origine navigateur. Neuf couvrent les
 deux primitives écrites à la main, **dont les vecteurs de référence de la
 RFC 6238** : c'est ce qui rend défendable de ne pas avoir pris de
-bibliothèque. Les vingt et un autres suivent la connexion — même réponse à
-tous les refus, code rejoué, verrouillage, session révoquée, expirée, glissante,
-et le journal d'audit, y compris qu'aucun secret n'y entre jamais.
+bibliothèque. Vingt et un suivent la connexion — même réponse à tous les refus,
+code rejoué, verrouillage, session révoquée, expirée, glissante, et le journal
+d'audit, y compris qu'aucun secret n'y entre jamais.
+
+Les quinze derniers suivent la file des signalements, et **les dossiers y
+naissent par l'API du produit** plutôt que fabriqués à la main : c'est le seul
+moyen que la file lise ce qu'un joueur dépose vraiment. L'un d'eux renomme la
+table après coup et vérifie que le dossier dit toujours ce qu'elle disait —
+c'est toute la raison d'être de l'instantané.
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d

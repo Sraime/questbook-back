@@ -488,14 +488,32 @@ model Report {
   reason         String   @db.Text
   createdAt      DateTime @default(now()) @map("created_at")
 
-  reporter     User @relation("ReportAuthor", fields: [reporterId], references: [id], onDelete: Cascade)
-  reportedUser User @relation("ReportedUser", fields: [reportedUserId], references: [id], onDelete: Cascade)
+  /// `open` puis `resolved`. Sans cette colonne, savoir ce qui restait a
+  /// examiner demandait un `psql` sur le VPS — alors que les conditions
+  /// d'utilisation annoncent un examen sous vingt-quatre heures.
+  status String @default("open")
+
+  /// Ce qui a ete decide : `dismissed`, `warned`, et plus tard `suspended` ou
+  /// `deleted`, quand ces gestes existeront.
+  resolution     String?   @map("resolution")
+  /// Le mot du support, pour le prochain qui relit le dossier.
+  resolutionNote String?   @map("resolution_note") @db.Text
+  resolvedAt     DateTime? @map("resolved_at")
+  resolvedById   String?   @map("resolved_by_id")
+
+  reporter     User       @relation("ReportAuthor", fields: [reporterId], references: [id], onDelete: Cascade)
+  reportedUser User       @relation("ReportedUser", fields: [reportedUserId], references: [id], onDelete: Cascade)
+  /// `SetNull` : un compte d'administration ferme ne doit pas emporter
+  /// l'historique des dossiers qu'il a tranches.
+  resolvedBy   AdminUser? @relation(fields: [resolvedById], references: [id], onDelete: SetNull)
 
   /// Signaler deux fois la même chose n'ajoute rien au dossier et donne un
   /// levier de harcèlement par le nombre.
   @@unique([reporterId, contentType, contentId])
   @@index([createdAt])
   @@index([reportedUserId])
+  /// La file du backoffice : les dossiers ouverts, le plus ancien en tete.
+  @@index([status, createdAt])
   @@map("reports")
 }
 
@@ -564,8 +582,9 @@ model AdminUser {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  sessions AdminSession[]
-  auditLog AdminAuditEntry[]
+  sessions        AdminSession[]
+  auditLog        AdminAuditEntry[]
+  resolvedReports Report[]
 
   @@map("admin_users")
 }

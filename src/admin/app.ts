@@ -8,6 +8,7 @@ import { installErrorHandling } from '../lib/fastify-errors.js';
 import prismaPlugin from '../plugins/prisma.js';
 import adminAuthPlugin from './plugins/admin-auth.js';
 import adminAuthRoutes from './auth/admin-auth.routes.js';
+import adminReportRoutes from './reports/admin-report.routes.js';
 
 export interface BuildAdminAppOptions {
   env: Env;
@@ -98,6 +99,7 @@ export async function buildAdminApp(
   // say which API answered. No `/v1`: this API and its front ship from the
   // same repository, in the same breath, and never need to disagree.
   await app.register(adminAuthRoutes, { prefix: '/admin/auth' });
+  await app.register(adminReportRoutes, { prefix: '/admin/reports' });
 
   return app;
 }
