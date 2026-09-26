@@ -1054,7 +1054,7 @@ document.
 
 | Méthode | Route              | Description                                              |
 | ------- | ------------------ | -------------------------------------------------------- |
-| `GET`   | `/scenarios`       | Résumés des scénarios possédés (titre, description, jauge) |
+| `GET`   | `/scenarios`       | Résumés des scénarios possédés (titre, description, jauge, dates) |
 | `GET`   | `/scenarios/:id`   | Document complet, PNJ et indices compris, si possédé ; sinon 404 |
 
 Personne ne crée de scénario par l'API : le catalogue est écrit en base
@@ -1069,6 +1069,27 @@ pour la distribution serait une seconde occasion de manquer à l'appel. Les
 **annexes** ont disparu au passage — elles étaient déjà des indices sans le
 nom, tout le catalogue n'en contenant que de type `clue` et `handout`, et
 `scenario_annexes` est devenue `scenario_clues`.
+
+#### Les deux dates, et pourquoi elles voyagent avec le résumé
+
+`createdAt` et `updatedAt` accompagnent le résumé **et** le détail. À la
+création, elles sont égales.
+
+C'est le seul moyen qu'a l'app de savoir que la copie qu'elle garde date
+d'avant une correction : rien ne redescend vers un scénario déjà téléchargé, et
+c'est elle qui doit s'en apercevoir. Elles voyagent donc avec le résumé, parce
+que la liste est l'endroit où la mise à jour se propose — demander quinze pages
+pour apprendre une date serait absurde. La comparaison se fait entre l'`updatedAt`
+rangé dans la copie locale et celui que la liste vient de rendre : **deux dates
+émises par le serveur**, jamais l'horloge de l'appareil, qui peut dériver.
+
+> ⚠️ `Scenario.updatedAt` est posé **à la main** par le service
+> d'administration, et cette ligne n'est pas cosmétique. `@updatedAt` ne bouge
+> que si Prisma a quelque chose à écrire : une correction qui ne touche qu'un
+> PNJ passe par un `data` vide et laisserait la date intacte. Or `scenario_npcs`
+> et `scenario_clues` n'ont pas de date à eux — celle du scénario est le seul
+> signal qui existe. Sans ce `updatedAt: at`, la moitié des corrections du
+> catalogue ne réveilleraient aucun appareil, en silence. Un test le tient.
 
 ### Boutique
 
@@ -1507,12 +1528,12 @@ dehors. UFW n'a donc besoin que de :
 
 ## Tests
 
-323 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
+325 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
 des doublures pour Google, Apple, Resend et FCM, et une vraie base PostgreSQL —
 plus quatre cas dédiés à la minimisation des emails (JWT, membres de table,
 joueur sans nom, 404).
 
-Le [backoffice](#le-backoffice) en occupe quatre-vingt-neuf. Cinq épinglent la
+Le [backoffice](#le-backoffice) en occupe quatre-vingt-dix. Cinq épinglent la
 séparation des deux API — elles ne portent pas les routes l'une de l'autre, et
 celle d'administration n'autorise aucune origine navigateur. Neuf couvrent les
 deux primitives écrites à la main, **dont les vecteurs de référence de la
@@ -1527,10 +1548,12 @@ lise ce qu'un joueur dépose vraiment. L'un d'eux renomme la table après coup e
 vérifie que le dossier dit toujours ce qu'elle disait — c'est toute la raison
 d'être de l'instantané.
 
-Quatorze portent l'écriture du catalogue. Deux valent plus que les autres :
+Quinze portent l'écriture du catalogue. Trois valent plus que les autres :
 l'un vérifie qu'un personnage corrigé **garde son identifiant** quand celui
 qu'on a retiré disparaît, l'autre qu'un indice supprimé emporte ses remises et
-que le journal en donne le compte. Un troisième écrit une aventure par le
+que le journal en donne le compte, le troisième qu'une correction portant sur
+un seul PNJ **date quand même le scénario** — sans quoi aucun appareil
+n'apprendrait qu'elle a eu lieu. Un troisième écrit une aventure par le
 backoffice et va la lire **par l'API du produit**, seule preuve que l'écran
 remplace vraiment l'`INSERT` de migration.
 

@@ -174,6 +174,23 @@ describe('correcting a scenario', () => {
     expect(npcs[0].description).toBe('Sait ou mene le tunnel.');
   });
 
+  // Le seul signal dont dispose une app pour savoir que sa copie a vieilli :
+  // les PNJ et les indices n'ont pas de date a eux, et Prisma ne touche pas
+  // `@updatedAt` quand il n'a rien d'autre a ecrire.
+  it('dates the adventure even when only a character changed', async () => {
+    const created = (await create(draft({ npcs: [{ name: 'La Veuve' }] }))).json();
+    expect(created.updatedAt).toBe(created.createdAt);
+
+    const response = await update(created.id, {
+      npcs: [{ id: created.npcs[0].id, name: 'La Veuve', description: 'Se tait.' }],
+    });
+
+    expect(response.json().createdAt).toBe(created.createdAt);
+    expect(new Date(response.json().updatedAt).getTime()).toBeGreaterThan(
+      new Date(created.updatedAt).getTime(),
+    );
+  });
+
   it('refuses a character borrowed from another adventure', async () => {
     const first = (await create(draft({ npcs: [{ name: 'La Veuve' }] }))).json();
     const second = (await create(draft({ title: 'Autre chose' }))).json();

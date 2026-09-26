@@ -8,6 +8,13 @@ export interface ScenarioSummaryDto {
   minRecommendedPlayers: number;
   maxRecommendedPlayers: number;
   averageDurationMinutes: number;
+  createdAt: string;
+  /// The app keeps a downloaded scenario exactly as it received it, so this is
+  /// the only thing that can tell it a correction has landed since. It travels
+  /// with the summary and not just the detail: the list is where the offer to
+  /// update appears, and asking for fifteen pages to learn a date would defeat
+  /// the point.
+  updatedAt: string;
 }
 
 export interface ScenarioNpcDto {
@@ -44,6 +51,8 @@ const summarySelect = {
   minRecommendedPlayers: true,
   maxRecommendedPlayers: true,
   averageDurationMinutes: true,
+  createdAt: true,
+  updatedAt: true,
 } as const;
 
 function toSummary(row: {
@@ -53,8 +62,14 @@ function toSummary(row: {
   minRecommendedPlayers: number;
   maxRecommendedPlayers: number;
   averageDurationMinutes: number;
+  createdAt: Date;
+  updatedAt: Date;
 }): ScenarioSummaryDto {
-  return { ...row };
+  return {
+    ...row,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
 }
 
 /// Gives every signed-in account the starter catalogue. Idempotent: already
