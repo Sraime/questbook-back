@@ -32,7 +32,7 @@ export function renderInvitationEmail(input: InvitationEmailInput): EmailMessage
       text: [
         `${input.inviterName} t'invite à rejoindre sa table « ${input.tableTitle} » sur Questbook.`,
         '',
-        'Tu n’as pas encore de compte : installe Questbook, connecte-toi avec cette adresse Google, puis ouvre l’onglet Tables. L’invitation t’y attend.',
+        'Tu n’as pas encore de compte : installe Questbook, connecte-toi avec cette adresse, puis ouvre l’onglet Tables. L’invitation t’y attend.',
         '',
         `Plus d’infos : ${input.acceptUrl}`,
       ].join('\n'),
@@ -46,7 +46,7 @@ export function renderInvitationEmail(input: InvitationEmailInput): EmailMessage
         <strong>« ${title} »</strong>.
       </p>
       <p style="margin:0 0 16px;line-height:1.5">
-        Installe Questbook, connecte-toi avec <strong>cette adresse Google</strong>,
+        Installe Questbook, connecte-toi avec <strong>cette adresse</strong>,
         puis ouvre l'onglet Tables : l'invitation t'y attend.
       </p>
       <p style="margin:0 0 24px">

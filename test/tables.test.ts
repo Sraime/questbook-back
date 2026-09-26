@@ -165,6 +165,66 @@ describe('Invitations', () => {
     expect(notifications.json().notifications[0].type).toBe('table_invitation');
   });
 
+  /// Ces textes ont dit « Google » pendant toute la vie de la connexion
+  /// Google, et sont restes faux le jour ou Apple a ouvert une seconde porte.
+  /// Rien ne les couvrait, d'ou ce qui suit : ce n'est pas la formulation
+  /// qu'on verrouille, c'est l'absence de fournisseur.
+  describe('what the invitation tells an address', () => {
+    it('names no provider, for a mailbox that has no account yet', async () => {
+      const gm = await signIn(context, 'gm');
+      const table = await createTable(context, gm);
+
+      await context.app.inject({
+        method: 'POST',
+        url: `/api/v1/tables/${table.id}/invitations`,
+        headers: gm.authHeader,
+        payload: { email: 'inconnu@example.com' },
+      });
+
+      const sent = context.email.lastTo('inconnu@example.com');
+
+      expect(sent?.text).not.toMatch(/Google|Apple/);
+      expect(sent?.html).not.toMatch(/Google|Apple/);
+
+      // Ce qui doit rester : c'est l'adresse qui compte, et sans elle
+      // `claimInvitations` ne rattache rien a la connexion qui suit.
+      expect(sent?.text).toContain('cette adresse');
+      expect(sent?.html).toContain('cette adresse');
+    });
+
+    it('names no provider either when the account already exists', async () => {
+      const gm = await signIn(context, 'gm');
+      const player = await signIn(context, 'player');
+      const table = await createTable(context, gm);
+
+      await context.app.inject({
+        method: 'POST',
+        url: `/api/v1/tables/${table.id}/invitations`,
+        headers: gm.authHeader,
+        payload: { email: player.email },
+      });
+
+      expect(context.email.lastTo(player.email)?.text).not.toMatch(/Google|Apple/);
+      expect(context.email.lastTo(player.email)?.html).not.toMatch(/Google|Apple/);
+    });
+
+    it('names no provider when the emailed link is followed without an account', async () => {
+      const gm = await signIn(context, 'gm');
+      const table = await createTable(context, gm);
+
+      const token = await invite(context, gm, table.id, 'inconnu@example.com');
+
+      const refused = await context.app.inject({
+        method: 'POST',
+        url: `/invitations/${token}/accept`,
+      });
+
+      expect(refused.statusCode).toBe(409);
+      expect(refused.body).not.toMatch(/Google|Apple/);
+      expect(refused.body).toContain('cette adresse');
+    });
+  });
+
   it('stores the token hashed, never the token itself', async () => {
     const gm = await signIn(context, 'gm');
     const player = await signIn(context, 'player');

@@ -518,7 +518,7 @@ export class TableService {
 
     if (!invitation.invitedUserId) {
       throw conflict(
-        'Crée un compte Questbook avec cette adresse Google, puis ouvre l’application.',
+        'Crée un compte Questbook avec cette adresse, puis ouvre l’application.',
       );
     }
 
