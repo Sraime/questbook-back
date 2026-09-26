@@ -244,6 +244,13 @@ export class SessionService {
       sessionId,
     }));
 
+    // Dropping or swapping the scenario takes its clues back with it. The
+    // game master never owned them — he could not edit one — so nothing of his
+    // is lost, whereas a permission left behind would keep a player reading a
+    // handout from an adventure the evening no longer plays.
+    const scenarioChanged =
+      input.scenarioId !== undefined && input.scenarioId !== existing.scenarioId;
+
     const row = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.gameSession.update({
         where: { id: sessionId },
@@ -258,6 +265,10 @@ export class SessionService {
         },
         include: sessionInclude,
       });
+
+      if (scenarioChanged) {
+        await tx.scenarioClueAccess.deleteMany({ where: { sessionId } });
+      }
 
       await this.notifications.record(tx, drafts);
       return updated;

@@ -173,7 +173,7 @@ export async function createAdminTestApp(): Promise<FastifyInstance> {
 /// model ever stops cascading from a user.
 export async function resetDatabase(): Promise<void> {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE users, characters, character_stats, character_resources, inventory_items, refresh_tokens, game_tables, table_members, table_invitations, game_sessions, session_attendances, session_npcs, session_boards, device_tokens, notifications, scenarios, scenario_annexes, scenario_ownerships, shop_items, shop_item_ownerships, reports, user_blocks, admin_users, admin_sessions, admin_audit_log RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE users, characters, character_stats, character_resources, inventory_items, refresh_tokens, game_tables, table_members, table_invitations, game_sessions, session_attendances, session_npcs, session_clues, session_clue_access, session_boards, device_tokens, notifications, scenarios, scenario_npcs, scenario_clues, scenario_clue_access, scenario_ownerships, shop_items, shop_item_ownerships, reports, user_blocks, admin_users, admin_sessions, admin_audit_log RESTART IDENTITY CASCADE',
   );
 }
 
