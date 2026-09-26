@@ -511,3 +511,116 @@ code {
   padding: 0.1rem 0.35rem;
   border-radius: 4px;
 }
+
+/* --- Le catalogue --------------------------------------------------------- */
+
+.queue-head {
+  padding: 0.7rem;
+  border-bottom: 1px solid var(--bord);
+}
+.queue-head button {
+  width: 100%;
+  border-color: var(--accent);
+}
+.queue-head button.selected {
+  background: var(--panneau-clair);
+}
+.muted.small {
+  display: block;
+  font-size: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+/* Un deroule se relit en entier : la colonne d'ecriture est plus large que
+   celle d'un dossier de signalement, qui ne porte que quelques phrases. */
+.detail.scenario {
+  max-width: 900px;
+  /* Pas de fond de page sous la barre d'enregistrement : `bottom: 0` colle au
+     bord de la boite de padding, et les quatre rem d'un dossier la feraient
+     flotter au milieu de rien. */
+  padding-bottom: 0;
+}
+
+.numbers {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.8rem;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--bord);
+  border-radius: var(--rayon);
+  cursor: pointer;
+}
+.check input {
+  width: auto;
+}
+.check strong {
+  display: block;
+  font-weight: 600;
+}
+.check em {
+  font-style: normal;
+  font-size: 0.8rem;
+  color: var(--doux);
+}
+
+/* Du markdown s'ecrit au chasse fixe : l'alignement d'un tableau ou d'une
+   liste se voit, et les espaces significatifs se comptent. */
+textarea.prose {
+  font-family: ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+textarea.prose.tall {
+  min-height: 420px;
+}
+
+.row-editor {
+  border: 1px solid var(--bord);
+  border-radius: var(--rayon);
+  padding: 0.7rem;
+  margin-bottom: 0.7rem;
+  background: var(--fond);
+}
+.row-head {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-bottom: 0.5rem;
+}
+.row-head input {
+  flex: 1;
+}
+.row-head button.link {
+  padding: 0.2rem 0.5rem;
+  text-decoration: none;
+}
+button.link.destructive {
+  color: var(--alerte);
+  text-decoration: underline;
+}
+.row-editor .muted {
+  font-size: 0.8rem;
+  margin: 0.4rem 0 0;
+}
+
+/* Le seul bouton de l'ecran qui ecrive : il reste sous la main, quelle que
+   soit la longueur du deroule au-dessus. */
+.save {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.8rem 0;
+  background: var(--fond);
+  border-top: 1px solid var(--bord);
+}
+.save button {
+  border-color: var(--accent);
+}
