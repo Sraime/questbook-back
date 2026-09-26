@@ -48,6 +48,51 @@ export interface SuspendedUser {
   suspensionReason: string | null;
 }
 
+export interface ScenarioSummary {
+  id: string;
+  title: string;
+  description: string;
+  grantOnSignup: boolean;
+  npcs: number;
+  clues: number;
+  owners: number;
+  updatedAt: string;
+}
+
+export interface ScenarioNpc {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export interface ScenarioClue {
+  id: string;
+  title: string;
+  contentMarkdown: string;
+  /// Combien de joueurs l'ont deja recu. Retirer l'indice effacerait ces
+  /// distributions, et l'ecran le dit avant qu'on le fasse.
+  sharedWith: number;
+}
+
+export interface ScenarioDetail {
+  id: string;
+  title: string;
+  description: string;
+  context: string;
+  rundownMarkdown: string;
+  minRecommendedPlayers: number;
+  maxRecommendedPlayers: number;
+  averageDurationMinutes: number;
+  grantOnSignup: boolean;
+  createdAt: string;
+  updatedAt: string;
+  npcs: ScenarioNpc[];
+  clues: ScenarioClue[];
+  owners: number;
+  sessions: number;
+  shopItems: number;
+}
+
 export interface UserDetail {
   id: string;
   email: string;
