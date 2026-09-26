@@ -57,6 +57,7 @@ model User {
   sentInvitations     TableInvitation[]   @relation("InvitationSender")
   receivedInvitations TableInvitation[]   @relation("InvitationRecipient")
   attendances         SessionAttendance[]
+  clueAccess          SessionClueAccess[]
   deviceTokens        DeviceToken[]
   notifications       Notification[]
   scenarioOwnerships  ScenarioOwnership[]
@@ -243,6 +244,7 @@ model GameSession {
   scenario    Scenario?           @relation(fields: [scenarioId], references: [id], onDelete: SetNull)
   attendances SessionAttendance[]
   npcs        SessionNpc[]
+  clues       SessionClue[]
   board       SessionBoard?
 
   @@index([tableId, startsAt])
@@ -268,6 +270,51 @@ model SessionNpc {
 
   @@index([sessionId, createdAt])
   @@map("session_npcs")
+}
+
+/// The inverse of a NPC: prepared the same way, but meant to cross the screen.
+/// A clue belongs to the session rather than the table, and carries no owner
+/// for the same reason as [SessionNpc] — a session has exactly one game master.
+///
+/// `image` cannot be created yet. It exists so that the clues a scenario will
+/// ship with cost a migration today rather than one the day they land.
+model SessionClue {
+  id              String   @id @default(uuid())
+  sessionId       String   @map("session_id")
+  title           String
+  /// `markdown` or `image`, stored as text like the other enumerations here.
+  kind            String   @default("markdown")
+  contentMarkdown String   @default("") @map("content_markdown") @db.Text
+  /// Set for `image` clues only, and read from the scenario's assets.
+  assetRef        String?  @map("asset_ref")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  session GameSession        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  access  SessionClueAccess[]
+
+  @@index([sessionId, createdAt])
+  @@map("session_clues")
+}
+
+/// Who may read a clue. The absence of a row is the default, and it is the
+/// strict one: a clue is nobody's until the game master says otherwise.
+///
+/// Both cascades matter. Removing a player from the table must not leave them
+/// holding a permission, and deleting a clue must not leave rows pointing at
+/// nothing.
+model SessionClueAccess {
+  id        String   @id @default(uuid())
+  clueId    String   @map("clue_id")
+  userId    String   @map("user_id")
+  grantedAt DateTime @default(now()) @map("granted_at")
+
+  clue SessionClue @relation(fields: [clueId], references: [id], onDelete: Cascade)
+  user User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([clueId, userId])
+  @@index([userId])
+  @@map("session_clue_access")
 }
 
 /// Backend-owned adventure. Players never create these: they appear in the
