@@ -88,6 +88,8 @@ describe('scenarios', () => {
         minRecommendedPlayers: 2,
         maxRecommendedPlayers: 5,
         averageDurationMinutes: 180,
+        createdAt: starter.createdAt.toISOString(),
+        updatedAt: starter.updatedAt.toISOString(),
       },
     ]);
     expect(list.json().scenarios.map((row: { id: string }) => row.id)).not.toContain(
@@ -116,6 +118,23 @@ describe('scenarios', () => {
     // evening without network carries everything that evening needs.
     expect(body.npcs).toHaveLength(1);
     expect(body.npcs[0]).toMatchObject({ name: 'Mariette Le Goff' });
+  });
+
+  it('dates the document, so a downloaded copy can tell it has aged', async () => {
+    const starter = await insertScenario({ grantOnSignup: true });
+    const user = await signIn(context);
+
+    const response = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/scenarios/${starter.id}`,
+      headers: user.authHeader,
+    });
+
+    const body = response.json();
+    expect(body.createdAt).toBe(starter.createdAt.toISOString());
+    expect(body.updatedAt).toBe(starter.updatedAt.toISOString());
+    // Une aventure qui vient d'etre ecrite n'a pas encore ete corrigee.
+    expect(body.updatedAt).toBe(body.createdAt);
   });
 
   it('hides unowned and unknown scenarios behind the same 404', async () => {

@@ -177,6 +177,7 @@ export class AdminScenarioService {
     id: string,
     adminId: string,
     input: UpdateScenarioInput,
+    at: Date = new Date(),
   ): Promise<AdminScenarioDetail> {
     const scenario = await this.prisma.scenario.findUnique({
       where: { id },
@@ -218,7 +219,15 @@ export class AdminScenarioService {
         : await this.prisma.scenarioClueAccess.count({ where: { clueId: { in: removedClues } } });
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.scenario.update({ where: { id }, data: fields });
+      // La date est posee a la main, et c'est tout sauf un detail.
+      //
+      // `@updatedAt` ne bouge que si Prisma a quelque chose a ecrire : une
+      // correction qui ne touche qu'un PNJ passe par un `data` vide et
+      // laisserait la date intacte. Or `ScenarioNpc` et `ScenarioClue` n'ont
+      // pas de date a eux — celle du scenario est **le seul signal** qu'une
+      // app possede pour savoir que sa copie a vieilli. Sans cette ligne, la
+      // moitie des corrections du catalogue ne reveilleraient aucun appareil.
+      await tx.scenario.update({ where: { id }, data: { ...fields, updatedAt: at } });
 
       if (npcs !== undefined) {
         await tx.scenarioNpc.deleteMany({ where: { id: { in: removedNpcs } } });
