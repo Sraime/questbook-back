@@ -45,6 +45,7 @@ src/
 │   ├── audit.ts              `recordAudit` : ce que l'administration a fait
 │   ├── auth/                 connexion par mot de passe et TOTP
 │   ├── reports/              la file des signalements
+│   ├── scenarios/            écrire et corriger le catalogue
 │   ├── users/                suspendre, lever, fermer un compte
 │   └── plugins/admin-auth.ts `app.requireAdmin`, la garde du backoffice
 ├── config/env.ts             validation zod des variables d'environnement
@@ -583,6 +584,55 @@ ce qui sépare une décision d'un faux mouvement de souris.
 La ligne d'audit est écrite **avant** la suppression et hors de sa transaction :
 `admin_audit_log` ne pointe pas vers `users`, mais une trace qui disparaîtrait
 avec ce qu'elle trace ne vaudrait rien.
+
+### Le catalogue des scénarios
+
+| Méthode | Route                  | Description                                  |
+| ------- | ---------------------- | -------------------------------------------- |
+| `GET`   | `/admin/scenarios`     | Le catalogue, et ce que chaque aventure pèse |
+| `GET`   | `/admin/scenarios/:id` | Le document entier, PNJ et indices compris   |
+| `POST`  | `/admin/scenarios`     | Écrit une aventure (201)                     |
+| `PATCH` | `/admin/scenarios/:id` | Corrige tout ou partie de celle-ci           |
+
+Le catalogue n'avait jusqu'ici aucun autre moyen d'exister qu'un `INSERT`
+écrit à la main dans une migration : les trois aventures livrées sont arrivées
+ainsi, et leurs PNJ et leurs indices aussi. Écrire une aventure demandait donc
+un déploiement, et corriger une faute de frappe également.
+
+C'est le seul écran du backoffice qui ne touche pas aux comptes : il écrit du
+produit. Il y vit quand même, parce qu'il réclame exactement la même porte —
+un mot de passe, un code, et aucune route vers Internet.
+
+**Une modification ne redescend pas.** L'app garde le scénario tel qu'elle l'a
+téléchargé, et rien ici ne va la réveiller : seul un compte qui télécharge
+après coup verra la nouvelle version. C'est voulu — une séance commencée ne
+doit pas voir son déroulé changer sous les yeux du meneur — et cela veut dire
+qu'une faute corrigée ce soir reste chez ceux qui possèdent déjà l'aventure.
+L'écran le dit là où on corrige, plutôt que de laisser croire à une diffusion.
+
+#### Les listes font autorité, et les identifiants tiennent
+
+`npcs` et `clues` sont facultatifs dans un `PATCH` ; **envoyés, ils
+remplacent**. Ce qui n'y figure plus est supprimé, faute de quoi retirer un
+PNJ n'aurait aucun geste.
+
+Chaque élément porte son `id` quand il existe déjà, et rien quand le
+formulaire vient de l'ajouter. C'est ce qui permet de réécrire une aventure
+entière sans redistribuer d'identifiants : ceux des indices sont cités par
+`scenario_clue_access`, donc par ce que des joueurs ont déjà reçu en séance.
+Un `id` venu d'une autre aventure est refusé — sans quoi il y déplacerait son
+PNJ en silence.
+
+> Supprimer un indice emporte ses `scenario_clue_access` par cascade, c'est-à-dire
+> la trace de ce qui a été distribué. Le détail donne donc `sharedWith` par
+> indice, l'écran l'affiche avant qu'on clique, et la ligne d'audit compte ce
+> que la suppression a révoqué : le chiffre serait introuvable après coup.
+
+L'ordre d'affichage n'est pas demandé, c'est celui du tableau reçu.
+`grantOnSignup` offre l'aventure à tout le monde : `grantStarterScenarios`
+tourne à chaque connexion, donc chaque compte la reçoit à la suivante.
+
+Les actions journalisées sont `scenario.create` et `scenario.update`.
 
 ### Créer un compte
 
@@ -1457,12 +1507,12 @@ dehors. UFW n'a donc besoin que de :
 
 ## Tests
 
-282 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
+323 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
 des doublures pour Google, Apple, Resend et FCM, et une vraie base PostgreSQL —
 plus quatre cas dédiés à la minimisation des emails (JWT, membres de table,
 joueur sans nom, 404).
 
-Le [backoffice](#le-backoffice) en occupe soixante-dix. Cinq épinglent la
+Le [backoffice](#le-backoffice) en occupe quatre-vingt-neuf. Cinq épinglent la
 séparation des deux API — elles ne portent pas les routes l'une de l'autre, et
 celle d'administration n'autorise aucune origine navigateur. Neuf couvrent les
 deux primitives écrites à la main, **dont les vecteurs de référence de la
@@ -1477,7 +1527,14 @@ lise ce qu'un joueur dépose vraiment. L'un d'eux renomme la table après coup e
 vérifie que le dossier dit toujours ce qu'elle disait — c'est toute la raison
 d'être de l'instantané.
 
-Les vingt derniers portent les sanctions, et **quatre d'entre eux valent pour
+Quatorze portent l'écriture du catalogue. Deux valent plus que les autres :
+l'un vérifie qu'un personnage corrigé **garde son identifiant** quand celui
+qu'on a retiré disparaît, l'autre qu'un indice supprimé emporte ses remises et
+que le journal en donne le compte. Un troisième écrit une aventure par le
+backoffice et va la lire **par l'API du produit**, seule preuve que l'écran
+remplace vraiment l'`INSERT` de migration.
+
+Vingt portent les sanctions, et **quatre d'entre eux valent pour
 toute la carte** : ils vérifient qu'une suspension mord au jeton d'accès déjà
 en main, à la reconnexion Google, à la reconnexion Apple et au
 rafraîchissement. Un cinquième pose la suspension en base sans révoquer les
