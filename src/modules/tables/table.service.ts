@@ -191,9 +191,7 @@ export class TableService {
       throw forbidden('The game master cannot leave their own table; delete it instead');
     }
 
-    await this.prisma.tableMember.delete({
-      where: { tableId_userId: { tableId, userId } },
-    });
+    await this.dropMembership(tableId, userId);
   }
 
   /// Handing over the table. The two roles are swapped rather than duplicated:
@@ -292,13 +290,31 @@ export class TableService {
       throw badRequest('Use DELETE on the table itself to disband it');
     }
 
-    const deleted = await this.prisma.tableMember.deleteMany({
-      where: { tableId, userId: memberUserId },
+    const membership = await this.prisma.tableMember.findUnique({
+      where: { tableId_userId: { tableId, userId: memberUserId } },
+      select: { id: true },
     });
 
-    if (deleted.count === 0) {
+    if (!membership) {
       throw notFound('Member not found');
     }
+
+    await this.dropMembership(tableId, memberUserId);
+  }
+
+  /// Leaving and being removed are the same departure, and both must take the
+  /// clues along. Their permissions hang off the account, not off membership:
+  /// nothing in the schema would drop them, and coming back to the table would
+  /// silently hand back everything the game master had once opened.
+  private async dropMembership(tableId: string, userId: string): Promise<void> {
+    await this.prisma.$transaction([
+      this.prisma.sessionClueAccess.deleteMany({
+        where: { userId, clue: { session: { tableId } } },
+      }),
+      this.prisma.tableMember.delete({
+        where: { tableId_userId: { tableId, userId } },
+      }),
+    ]);
   }
 
   // --- Invitations ---
@@ -518,7 +534,7 @@ export class TableService {
 
     if (!invitation.invitedUserId) {
       throw conflict(
-        'Crée un compte Questbook avec cette adresse Google, puis ouvre l’application.',
+        'Crée un compte Questbook avec cette adresse, puis ouvre l’application.',
       );
     }
 

@@ -45,6 +45,7 @@ src/
 │   ├── audit.ts              `recordAudit` : ce que l'administration a fait
 │   ├── auth/                 connexion par mot de passe et TOTP
 │   ├── reports/              la file des signalements
+│   ├── scenarios/            écrire et corriger le catalogue
 │   ├── users/                suspendre, lever, fermer un compte
 │   └── plugins/admin-auth.ts `app.requireAdmin`, la garde du backoffice
 ├── config/env.ts             validation zod des variables d'environnement
@@ -128,7 +129,9 @@ garde une identité unique sur tous les appareils, sans table de correspondance.
 | `game_sessions`       | Séance : titre, description, date/heure, lieu, statut, scénario optionnel |
 | `session_attendances` | Réponses des joueurs (`yes` / `no`) et personnage joué, exigé pour un `yes` |
 | `scenarios`           | Catalogue de scénarios, écrits côté serveur (pas par les joueurs) |
-| `scenario_annexes`    | Cartes, indices, documents d'un scénario                          |
+| `scenario_npcs`       | Les PNJ qu'un scénario livre avec lui                             |
+| `scenario_clues`      | Les indices qu'un scénario livre avec lui (ex-`scenario_annexes`) |
+| `scenario_clue_access`| Qui, **dans quelle séance**, a reçu un indice du catalogue        |
 | `session_boards`      | La carte et les pions d'une session, tels que le MJ les a poussés   |
 | `scenario_ownerships` | Qui possède un scénario (`grant` à la connexion, `purchase` depuis la boutique) |
 | `shop_items`          | Catalogue de la boutique : titre, type, description, prix, clés d'image et d'asset |
@@ -582,6 +585,55 @@ La ligne d'audit est écrite **avant** la suppression et hors de sa transaction 
 `admin_audit_log` ne pointe pas vers `users`, mais une trace qui disparaîtrait
 avec ce qu'elle trace ne vaudrait rien.
 
+### Le catalogue des scénarios
+
+| Méthode | Route                  | Description                                  |
+| ------- | ---------------------- | -------------------------------------------- |
+| `GET`   | `/admin/scenarios`     | Le catalogue, et ce que chaque aventure pèse |
+| `GET`   | `/admin/scenarios/:id` | Le document entier, PNJ et indices compris   |
+| `POST`  | `/admin/scenarios`     | Écrit une aventure (201)                     |
+| `PATCH` | `/admin/scenarios/:id` | Corrige tout ou partie de celle-ci           |
+
+Le catalogue n'avait jusqu'ici aucun autre moyen d'exister qu'un `INSERT`
+écrit à la main dans une migration : les trois aventures livrées sont arrivées
+ainsi, et leurs PNJ et leurs indices aussi. Écrire une aventure demandait donc
+un déploiement, et corriger une faute de frappe également.
+
+C'est le seul écran du backoffice qui ne touche pas aux comptes : il écrit du
+produit. Il y vit quand même, parce qu'il réclame exactement la même porte —
+un mot de passe, un code, et aucune route vers Internet.
+
+**Une modification ne redescend pas.** L'app garde le scénario tel qu'elle l'a
+téléchargé, et rien ici ne va la réveiller : seul un compte qui télécharge
+après coup verra la nouvelle version. C'est voulu — une séance commencée ne
+doit pas voir son déroulé changer sous les yeux du meneur — et cela veut dire
+qu'une faute corrigée ce soir reste chez ceux qui possèdent déjà l'aventure.
+L'écran le dit là où on corrige, plutôt que de laisser croire à une diffusion.
+
+#### Les listes font autorité, et les identifiants tiennent
+
+`npcs` et `clues` sont facultatifs dans un `PATCH` ; **envoyés, ils
+remplacent**. Ce qui n'y figure plus est supprimé, faute de quoi retirer un
+PNJ n'aurait aucun geste.
+
+Chaque élément porte son `id` quand il existe déjà, et rien quand le
+formulaire vient de l'ajouter. C'est ce qui permet de réécrire une aventure
+entière sans redistribuer d'identifiants : ceux des indices sont cités par
+`scenario_clue_access`, donc par ce que des joueurs ont déjà reçu en séance.
+Un `id` venu d'une autre aventure est refusé — sans quoi il y déplacerait son
+PNJ en silence.
+
+> Supprimer un indice emporte ses `scenario_clue_access` par cascade, c'est-à-dire
+> la trace de ce qui a été distribué. Le détail donne donc `sharedWith` par
+> indice, l'écran l'affiche avant qu'on clique, et la ligne d'audit compte ce
+> que la suppression a révoqué : le chiffre serait introuvable après coup.
+
+L'ordre d'affichage n'est pas demandé, c'est celui du tableau reçu.
+`grantOnSignup` offre l'aventure à tout le monde : `grantStarterScenarios`
+tourne à chaque connexion, donc chaque compte la reçoit à la suivante.
+
+Les actions journalisées sont `scenario.create` et `scenario.update`.
+
 ### Créer un compte
 
 Il n'y a pas de route d'inscription : un backoffice qui en ouvrirait une
@@ -779,6 +831,12 @@ la supprimer.
 | `POST`   | `/sessions/:id/npcs`                           | En ajouter un (MJ, 201)                           |
 | `PATCH`  | `/sessions/:id/npcs/:npcId`                    | Nom, description (MJ)                             |
 | `DELETE` | `/sessions/:id/npcs/:npcId`                    | Le retirer (MJ, 204)                              |
+| `GET`    | `/sessions/:id/clues`                          | Les indices et leurs destinataires (MJ seul)      |
+| `POST`   | `/sessions/:id/clues`                          | En composer un, en markdown (MJ, 201)             |
+| `PATCH`  | `/sessions/:id/clues/:clueId`                  | Titre, contenu (MJ)                               |
+| `DELETE` | `/sessions/:id/clues/:clueId`                  | Le retirer (MJ, 204)                              |
+| `PUT`    | `/sessions/:id/clues/:clueId/access`           | `{ "userIds" }` — remplace la liste (MJ)          |
+| `GET`    | `/sessions/:id/clues/mine`                     | Les indices qu'on m'a ouverts, et eux seuls       |
 | `GET`    | `/sessions/:id/board`                          | Le plateau, lisible par toute la table            |
 | `PUT`    | `/sessions/:id/board`                          | Le remplacer entier (MJ)                          |
 | `GET`    | `/sessions/:id/board/live`                     | WebSocket : le plateau, puis chaque poussée       |
@@ -790,6 +848,66 @@ Le champ `nextSessionAt` d'une table ne désigne **que** des séances à venir, 
 vaut `null` s'il n'y en a aucune. Rien ne fait changer de statut une session une
 fois qu'elle a eu lieu : sans ce filtre, la plus ancienne séance `scheduled`
 resterait éternellement en tête et masquerait celle que les joueurs attendent.
+
+#### Les indices, et le premier destinataire du schéma
+
+Un indice est l'inverse d'un PNJ : préparé de la même façon, mais destiné à
+passer de l'autre côté de l'écran — un par un, et seulement à ceux que le MJ
+désigne. Comme les PNJ, il appartient à la séance et non à la table, et n'a pas
+de colonne de propriétaire : une séance n'a qu'un MJ.
+
+C'est **la première donnée de Questbook à porter un destinataire**. Le plateau
+est tout-ou-rien pour la table entière, les PNJ tout-ou-rien pour le MJ. D'où
+`session_clue_access`, une ligne par couple `(indice, joueur)`, où **l'absence
+de ligne est le défaut** : un indice n'est à personne tant que le MJ n'a rien
+fait.
+
+`PUT .../access` remplace la liste plutôt que d'y ajouter, parce que c'est le
+geste de l'écran : le MJ coche des noms et valide. Reprendre un indice est donc
+le même appel avec un nom de moins, et un tableau vide est la façon légitime de
+le reprendre à tout le monde — pas une erreur à refuser.
+
+`GET .../clues/mine` est la seule route ouverte à un joueur, et elle ne laisse
+**rien** filtrer du reste : ni compte, ni identifiant, ni trou dans un ordre. Ce
+que le MJ garde ne doit pas se deviner. Son DTO n'est d'ailleurs pas celui du MJ
+amputé de `sharedWith` : le champ n'existe pas de ce côté, sinon quelqu'un
+finira par l'envoyer vide au lieu de l'omettre.
+
+Attention à un piège que les cascades ne couvrent pas : **une permission pend au
+compte, pas à l'appartenance à la table**. Retirer un joueur ne la supprimerait
+donc pas, et son retour lui rendrait en silence tout ce qui lui avait été
+ouvert. `TableService.dropMembership` s'en charge, pour le départ volontaire
+comme pour le retrait par le MJ.
+
+Pas de temps réel ici : un joueur découvre ses indices en ouvrant son volet. Le
+canal WebSocket reste dédié au plateau.
+
+#### Ce que le scénario apporte à la séance
+
+Une séance qui déclare un scénario joue **deux piles à la fois** : ce que le
+catalogue livre, et ce que le MJ a écrit. `GET /sessions/:id/npcs` et
+`GET /sessions/:id/clues` renvoient les deux, celles du scénario d'abord, et
+chaque élément porte son `origin` — `scenario` ou `gameMaster`.
+
+**Rien n'est copié.** La séance lit le catalogue à chaque appel, si bien qu'une
+correction apportée à une aventure se voit le soir où on la joue. En échange,
+tout ce qui distingue les deux piles tient en une règle : `PATCH` et `DELETE`
+sur un élément du scénario répondent **400**, pas 404. Le MJ l'a sous les yeux ;
+lui dire « introuvable » l'enverrait chercher un bug là où il n'y a qu'une
+règle.
+
+Le partage, lui, fonctionne à l'identique sur les deux — c'est la raison d'être
+d'un indice livré avec l'aventure. Il lui fallait juste sa propre table :
+`scenario_clue_access` porte **la séance dans sa clé**, là où
+`session_clue_access` n'en a pas besoin. Le même carnet de la crique se
+transmet soir après soir, à d'autres tables, à d'autres gens, et rien de tout
+cela ne doit se suivre d'une séance à l'autre.
+
+Retirer ou changer le scénario d'une séance reprend ce qu'il avait distribué
+(`SessionService.patch` efface les lignes d'accès). Le MJ n'a jamais pu modifier
+ces indices, donc rien de son travail ne disparaît — alors qu'une permission
+oubliée laisserait un joueur relire le document d'une aventure qui ne se joue
+plus.
 
 #### Le plateau, et pourquoi il est monté ici
 
@@ -936,14 +1054,42 @@ document.
 
 | Méthode | Route              | Description                                              |
 | ------- | ------------------ | -------------------------------------------------------- |
-| `GET`   | `/scenarios`       | Résumés des scénarios possédés (titre, description, jauge) |
-| `GET`   | `/scenarios/:id`   | Document complet + annexes, si possédé ; sinon 404       |
+| `GET`   | `/scenarios`       | Résumés des scénarios possédés (titre, description, jauge, dates) |
+| `GET`   | `/scenarios/:id`   | Document complet, PNJ et indices compris, si possédé ; sinon 404 |
 
 Personne ne crée de scénario par l'API : le catalogue est écrit en base
 (migration / admin). Les scénarios marqués `grant_on_signup` sont donnés à
 chaque compte à la connexion, pour que la liste ne soit pas vide ; les autres
 s'achètent à la boutique. Un id inconnu ou non possédé répond **404**, pas
 403 : le catalogue n'est pas public.
+
+Le document complet porte tout ce dont une soirée a besoin, PNJ et indices
+compris : l'app le stocke entier pour le lire hors ligne, et un second appel
+pour la distribution serait une seconde occasion de manquer à l'appel. Les
+**annexes** ont disparu au passage — elles étaient déjà des indices sans le
+nom, tout le catalogue n'en contenant que de type `clue` et `handout`, et
+`scenario_annexes` est devenue `scenario_clues`.
+
+#### Les deux dates, et pourquoi elles voyagent avec le résumé
+
+`createdAt` et `updatedAt` accompagnent le résumé **et** le détail. À la
+création, elles sont égales.
+
+C'est le seul moyen qu'a l'app de savoir que la copie qu'elle garde date
+d'avant une correction : rien ne redescend vers un scénario déjà téléchargé, et
+c'est elle qui doit s'en apercevoir. Elles voyagent donc avec le résumé, parce
+que la liste est l'endroit où la mise à jour se propose — demander quinze pages
+pour apprendre une date serait absurde. La comparaison se fait entre l'`updatedAt`
+rangé dans la copie locale et celui que la liste vient de rendre : **deux dates
+émises par le serveur**, jamais l'horloge de l'appareil, qui peut dériver.
+
+> ⚠️ `Scenario.updatedAt` est posé **à la main** par le service
+> d'administration, et cette ligne n'est pas cosmétique. `@updatedAt` ne bouge
+> que si Prisma a quelque chose à écrire : une correction qui ne touche qu'un
+> PNJ passe par un `data` vide et laisserait la date intacte. Or `scenario_npcs`
+> et `scenario_clues` n'ont pas de date à eux — celle du scénario est le seul
+> signal qui existe. Sans ce `updatedAt: at`, la moitié des corrections du
+> catalogue ne réveilleraient aucun appareil, en silence. Un test le tient.
 
 ### Boutique
 
@@ -1382,12 +1528,12 @@ dehors. UFW n'a donc besoin que de :
 
 ## Tests
 
-282 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
+325 tests d'intégration qui traversent tout le serveur via `app.inject()`, avec
 des doublures pour Google, Apple, Resend et FCM, et une vraie base PostgreSQL —
 plus quatre cas dédiés à la minimisation des emails (JWT, membres de table,
 joueur sans nom, 404).
 
-Le [backoffice](#le-backoffice) en occupe soixante-dix. Cinq épinglent la
+Le [backoffice](#le-backoffice) en occupe quatre-vingt-dix. Cinq épinglent la
 séparation des deux API — elles ne portent pas les routes l'une de l'autre, et
 celle d'administration n'autorise aucune origine navigateur. Neuf couvrent les
 deux primitives écrites à la main, **dont les vecteurs de référence de la
@@ -1402,7 +1548,16 @@ lise ce qu'un joueur dépose vraiment. L'un d'eux renomme la table après coup e
 vérifie que le dossier dit toujours ce qu'elle disait — c'est toute la raison
 d'être de l'instantané.
 
-Les vingt derniers portent les sanctions, et **quatre d'entre eux valent pour
+Quinze portent l'écriture du catalogue. Trois valent plus que les autres :
+l'un vérifie qu'un personnage corrigé **garde son identifiant** quand celui
+qu'on a retiré disparaît, l'autre qu'un indice supprimé emporte ses remises et
+que le journal en donne le compte, le troisième qu'une correction portant sur
+un seul PNJ **date quand même le scénario** — sans quoi aucun appareil
+n'apprendrait qu'elle a eu lieu. Un troisième écrit une aventure par le
+backoffice et va la lire **par l'API du produit**, seule preuve que l'écran
+remplace vraiment l'`INSERT` de migration.
+
+Vingt portent les sanctions, et **quatre d'entre eux valent pour
 toute la carte** : ils vérifient qu'une suspension mord au jeton d'accès déjà
 en main, à la reconnexion Google, à la reconnexion Apple et au
 rafraîchissement. Un cinquième pose la suspension en base sans révoquer les

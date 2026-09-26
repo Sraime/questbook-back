@@ -8,20 +8,40 @@ export interface ScenarioSummaryDto {
   minRecommendedPlayers: number;
   maxRecommendedPlayers: number;
   averageDurationMinutes: number;
+  createdAt: string;
+  /// The app keeps a downloaded scenario exactly as it received it, so this is
+  /// the only thing that can tell it a correction has landed since. It travels
+  /// with the summary and not just the detail: the list is where the offer to
+  /// update appears, and asking for fifteen pages to learn a date would defeat
+  /// the point.
+  updatedAt: string;
 }
 
-export interface ScenarioAnnexDto {
+export interface ScenarioNpcDto {
+  id: string;
+  sortOrder: number;
+  name: string;
+  description: string;
+}
+
+/// What the adventure means to be handed over. Was an annex, and was only ever
+/// read in the scenario's own screen; it is now the same thing a game master
+/// shares during the evening, so it bears the product's word for it.
+export interface ScenarioClueDto {
   id: string;
   sortOrder: number;
   title: string;
-  kind: string;
   contentMarkdown: string;
 }
 
+/// Everything at once, because the app stores this document whole to read it
+/// offline: a second call for the cast would be a second chance to be missing
+/// the evening it matters.
 export interface ScenarioDetailDto extends ScenarioSummaryDto {
   context: string;
   rundownMarkdown: string;
-  annexes: ScenarioAnnexDto[];
+  npcs: ScenarioNpcDto[];
+  clues: ScenarioClueDto[];
 }
 
 const summarySelect = {
@@ -31,6 +51,8 @@ const summarySelect = {
   minRecommendedPlayers: true,
   maxRecommendedPlayers: true,
   averageDurationMinutes: true,
+  createdAt: true,
+  updatedAt: true,
 } as const;
 
 function toSummary(row: {
@@ -40,8 +62,14 @@ function toSummary(row: {
   minRecommendedPlayers: number;
   maxRecommendedPlayers: number;
   averageDurationMinutes: number;
+  createdAt: Date;
+  updatedAt: Date;
 }): ScenarioSummaryDto {
-  return { ...row };
+  return {
+    ...row,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
 }
 
 /// Gives every signed-in account the starter catalogue. Idempotent: already
@@ -97,7 +125,10 @@ export class ScenarioService {
 
     const row = await this.prisma.scenario.findUnique({
       where: { id: scenarioId },
-      include: { annexes: { orderBy: { sortOrder: 'asc' } } },
+      include: {
+        npcs: { orderBy: { sortOrder: 'asc' } },
+        clues: { orderBy: { sortOrder: 'asc' } },
+      },
     });
 
     if (!row) {
@@ -108,12 +139,17 @@ export class ScenarioService {
       ...toSummary(row),
       context: row.context,
       rundownMarkdown: row.rundownMarkdown,
-      annexes: row.annexes.map((annex) => ({
-        id: annex.id,
-        sortOrder: annex.sortOrder,
-        title: annex.title,
-        kind: annex.kind,
-        contentMarkdown: annex.contentMarkdown,
+      npcs: row.npcs.map((npc) => ({
+        id: npc.id,
+        sortOrder: npc.sortOrder,
+        name: npc.name,
+        description: npc.description,
+      })),
+      clues: row.clues.map((clue) => ({
+        id: clue.id,
+        sortOrder: clue.sortOrder,
+        title: clue.title,
+        contentMarkdown: clue.contentMarkdown,
       })),
     };
   }

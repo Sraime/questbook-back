@@ -2,18 +2,21 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, forgetToken, readToken, SessionExpired } from './api';
 import { ReportDetail } from './ReportDetail';
 import { ReportQueue } from './ReportQueue';
+import { ScenarioCatalogue } from './ScenarioCatalogue';
 import { SignIn } from './SignIn';
 import { SuspendedList } from './SuspendedList';
 import type { Admin, ReportDetail as Report, ReportPage } from './types';
 
 type Status = 'open' | 'resolved';
 
-/// Deux travaux distincts, donc deux vues.
+/// Des travaux distincts, donc des vues distinctes.
 ///
 /// Examiner un dossier et passer en revue les mesures en cours ne se font ni
 /// au meme moment ni dans le meme etat d'esprit : les melanger dans la meme
-/// colonne ferait de la seconde un onglet qu'on n'ouvre jamais.
-type View = 'reports' | 'suspended';
+/// colonne ferait de la seconde un onglet qu'on n'ouvre jamais. Ecrire le
+/// catalogue est plus etranger encore — c'est du produit, pas de la
+/// moderation — mais cela reclame le meme compte et la meme porte.
+type View = 'reports' | 'suspended' | 'scenarios';
 
 export function App() {
   const [admin, setAdmin] = useState<Admin | null>(null);
@@ -116,6 +119,12 @@ export function App() {
           >
             Comptes suspendus
           </button>
+          <button
+            className={view === 'scenarios' ? 'active' : ''}
+            onClick={() => setView('scenarios')}
+          >
+            Scénarios
+          </button>
         </nav>
 
         <span className="spacer" />
@@ -135,6 +144,8 @@ export function App() {
       )}
 
       {view === 'suspended' && <SuspendedList onError={handle} />}
+
+      {view === 'scenarios' && <ScenarioCatalogue onError={handle} />}
 
       {view === 'reports' && (
       <div className="columns">

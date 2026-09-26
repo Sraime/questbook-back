@@ -33,12 +33,20 @@ async function insertScenario(options: {
       averageDurationMinutes: 180,
       rundownMarkdown: '## Mise en place\n\nDonner le télégramme.',
       grantOnSignup: options.grantOnSignup ?? false,
-      annexes: {
+      npcs: {
+        create: [
+          {
+            sortOrder: 0,
+            name: 'Mariette Le Goff',
+            description: 'La femme du gardien. Ment sur les dates.',
+          },
+        ],
+      },
+      clues: {
         create: [
           {
             sortOrder: 0,
             title: 'Télégramme',
-            kind: 'handout',
             contentMarkdown: 'GARDEN DISPARU STOP',
           },
         ],
@@ -80,6 +88,8 @@ describe('scenarios', () => {
         minRecommendedPlayers: 2,
         maxRecommendedPlayers: 5,
         averageDurationMinutes: 180,
+        createdAt: starter.createdAt.toISOString(),
+        updatedAt: starter.updatedAt.toISOString(),
       },
     ]);
     expect(list.json().scenarios.map((row: { id: string }) => row.id)).not.toContain(
@@ -102,11 +112,29 @@ describe('scenarios', () => {
     expect(body.id).toBe(starter.id);
     expect(body.context).toBe("Kerloc'h, 1924.");
     expect(body.rundownMarkdown).toContain('Mise en place');
-    expect(body.annexes).toHaveLength(1);
-    expect(body.annexes[0]).toMatchObject({
-      title: 'Télégramme',
-      kind: 'handout',
+    expect(body.clues).toHaveLength(1);
+    expect(body.clues[0]).toMatchObject({ title: 'Télégramme' });
+    // The cast travels with the document, so a scenario downloaded for an
+    // evening without network carries everything that evening needs.
+    expect(body.npcs).toHaveLength(1);
+    expect(body.npcs[0]).toMatchObject({ name: 'Mariette Le Goff' });
+  });
+
+  it('dates the document, so a downloaded copy can tell it has aged', async () => {
+    const starter = await insertScenario({ grantOnSignup: true });
+    const user = await signIn(context);
+
+    const response = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/scenarios/${starter.id}`,
+      headers: user.authHeader,
     });
+
+    const body = response.json();
+    expect(body.createdAt).toBe(starter.createdAt.toISOString());
+    expect(body.updatedAt).toBe(starter.updatedAt.toISOString());
+    // Une aventure qui vient d'etre ecrite n'a pas encore ete corrigee.
+    expect(body.updatedAt).toBe(body.createdAt);
   });
 
   it('hides unowned and unknown scenarios behind the same 404', async () => {

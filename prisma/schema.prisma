@@ -52,19 +52,21 @@ model User {
   characters    Character[]
   refreshTokens RefreshToken[]
 
-  ownedTables         GameTable[]         @relation("TableOwner")
+  ownedTables         GameTable[]          @relation("TableOwner")
   memberships         TableMember[]
-  sentInvitations     TableInvitation[]   @relation("InvitationSender")
-  receivedInvitations TableInvitation[]   @relation("InvitationRecipient")
+  sentInvitations     TableInvitation[]    @relation("InvitationSender")
+  receivedInvitations TableInvitation[]    @relation("InvitationRecipient")
   attendances         SessionAttendance[]
+  clueAccess          SessionClueAccess[]
+  scenarioClueAccess  ScenarioClueAccess[]
   deviceTokens        DeviceToken[]
   notifications       Notification[]
   scenarioOwnerships  ScenarioOwnership[]
   shopItemOwnerships  ShopItemOwnership[]
-  reportsFiled        Report[]            @relation("ReportAuthor")
-  reportsAbout        Report[]            @relation("ReportedUser")
-  blocksMade          UserBlock[]         @relation("BlockAuthor")
-  blocksAgainst       UserBlock[]         @relation("BlockedUser")
+  reportsFiled        Report[]             @relation("ReportAuthor")
+  reportsAbout        Report[]             @relation("ReportedUser")
+  blocksMade          UserBlock[]          @relation("BlockAuthor")
+  blocksAgainst       UserBlock[]          @relation("BlockedUser")
 
   @@map("users")
 }
@@ -239,11 +241,13 @@ model GameSession {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  table       GameTable           @relation(fields: [tableId], references: [id], onDelete: Cascade)
-  scenario    Scenario?           @relation(fields: [scenarioId], references: [id], onDelete: SetNull)
-  attendances SessionAttendance[]
-  npcs        SessionNpc[]
-  board       SessionBoard?
+  table              GameTable            @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  scenario           Scenario?            @relation(fields: [scenarioId], references: [id], onDelete: SetNull)
+  attendances        SessionAttendance[]
+  npcs               SessionNpc[]
+  clues              SessionClue[]
+  scenarioClueAccess ScenarioClueAccess[]
+  board              SessionBoard?
 
   @@index([tableId, startsAt])
   @@map("game_sessions")
@@ -270,44 +274,135 @@ model SessionNpc {
   @@map("session_npcs")
 }
 
+/// The inverse of a NPC: prepared the same way, but meant to cross the screen.
+/// A clue belongs to the session rather than the table, and carries no owner
+/// for the same reason as [SessionNpc] — a session has exactly one game master.
+///
+/// `image` cannot be created yet. It exists so that the clues a scenario will
+/// ship with cost a migration today rather than one the day they land.
+model SessionClue {
+  id              String   @id @default(uuid())
+  sessionId       String   @map("session_id")
+  title           String
+  /// `markdown` or `image`, stored as text like the other enumerations here.
+  kind            String   @default("markdown")
+  contentMarkdown String   @default("") @map("content_markdown") @db.Text
+  /// Set for `image` clues only, and read from the scenario's assets.
+  assetRef        String?  @map("asset_ref")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  session GameSession         @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  access  SessionClueAccess[]
+
+  @@index([sessionId, createdAt])
+  @@map("session_clues")
+}
+
+/// Who may read a clue. The absence of a row is the default, and it is the
+/// strict one: a clue is nobody's until the game master says otherwise.
+///
+/// Both cascades matter. Removing a player from the table must not leave them
+/// holding a permission, and deleting a clue must not leave rows pointing at
+/// nothing.
+model SessionClueAccess {
+  id        String   @id @default(uuid())
+  clueId    String   @map("clue_id")
+  userId    String   @map("user_id")
+  grantedAt DateTime @default(now()) @map("granted_at")
+
+  clue SessionClue @relation(fields: [clueId], references: [id], onDelete: Cascade)
+  user User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([clueId, userId])
+  @@index([userId])
+  @@map("session_clue_access")
+}
+
 /// Backend-owned adventure. Players never create these: they appear in the
 /// shop later, and until then a few rows are granted on sign-in.
 model Scenario {
-  id                       String   @id @default(uuid())
-  title                    String
-  description              String
-  context                  String   @db.Text
-  minRecommendedPlayers    Int      @map("min_recommended_players")
-  maxRecommendedPlayers    Int      @map("max_recommended_players")
-  averageDurationMinutes   Int      @map("average_duration_minutes")
-  rundownMarkdown          String   @map("rundown_markdown") @db.Text
+  id                     String   @id @default(uuid())
+  title                  String
+  description            String
+  context                String   @db.Text
+  minRecommendedPlayers  Int      @map("min_recommended_players")
+  maxRecommendedPlayers  Int      @map("max_recommended_players")
+  averageDurationMinutes Int      @map("average_duration_minutes")
+  rundownMarkdown        String   @map("rundown_markdown") @db.Text
   /// Starter catalogue: every account receives ownership on sign-in, so the
   /// list is not empty before the shop exists.
-  grantOnSignup            Boolean  @default(false) @map("grant_on_signup")
-  createdAt                DateTime @default(now()) @map("created_at")
-  updatedAt                DateTime @updatedAt @map("updated_at")
+  grantOnSignup          Boolean  @default(false) @map("grant_on_signup")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
 
-  annexes     ScenarioAnnex[]
-  ownerships  ScenarioOwnership[]
-  sessions    GameSession[]
-  shopItems   ShopItem[]
+  npcs       ScenarioNpc[]
+  clues      ScenarioClue[]
+  ownerships ScenarioOwnership[]
+  sessions   GameSession[]
+  shopItems  ShopItem[]
 
   @@map("scenarios")
 }
 
-model ScenarioAnnex {
-  id               String @id @default(uuid())
-  scenarioId       String @map("scenario_id")
-  sortOrder        Int    @map("sort_order")
-  title            String
-  /// `map`, `clue` or `handout` — stored as text like other enumerations here.
-  kind             String
-  contentMarkdown  String @map("content_markdown") @db.Text
+/// A non-player character the adventure ships with, read by the game master
+/// who runs it and never by a player — exactly like [SessionNpc], which it
+/// stands beside in the session's panel.
+///
+/// Nothing points back to a session: a scenario's cast is read where the
+/// session says which scenario it plays. Copying it in would freeze the
+/// catalogue's corrections out of evenings already scheduled.
+model ScenarioNpc {
+  id          String @id @default(uuid())
+  scenarioId  String @map("scenario_id")
+  sortOrder   Int    @map("sort_order")
+  name        String
+  description String @default("") @db.Text
 
   scenario Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
 
   @@index([scenarioId, sortOrder])
-  @@map("scenario_annexes")
+  @@map("scenario_npcs")
+}
+
+/// What the adventure means to be handed over: a telegram, a soaked notebook,
+/// a page torn from a journal. Was called an annex, and was only ever read in
+/// the scenario's own screen; it is now the same thing a game master shares,
+/// so it bears the one name the product uses for it.
+model ScenarioClue {
+  id              String @id @default(uuid())
+  scenarioId      String @map("scenario_id")
+  sortOrder       Int    @map("sort_order")
+  title           String
+  contentMarkdown String @map("content_markdown") @db.Text
+
+  scenario Scenario             @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  access   ScenarioClueAccess[]
+
+  @@index([scenarioId, sortOrder])
+  @@map("scenario_clues")
+}
+
+/// Who, in one evening, has been given a clue that belongs to the catalogue.
+///
+/// The session is part of the key and that is the whole reason this table
+/// exists beside [SessionClueAccess]: the same catalogue clue is handed out
+/// evening after evening, at different tables, to different people. A clue the
+/// game master wrote belongs to his session and needs no such column.
+model ScenarioClueAccess {
+  id        String   @id @default(uuid())
+  sessionId String   @map("session_id")
+  clueId    String   @map("clue_id")
+  userId    String   @map("user_id")
+  grantedAt DateTime @default(now()) @map("granted_at")
+
+  session GameSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  clue    ScenarioClue @relation(fields: [clueId], references: [id], onDelete: Cascade)
+  user    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, clueId, userId])
+  @@index([sessionId, userId])
+  @@map("scenario_clue_access")
 }
 
 /// An article on sale. Backend-owned like scenarios: players never create

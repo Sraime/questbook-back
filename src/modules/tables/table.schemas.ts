@@ -91,6 +91,33 @@ export const sessionNpcParamsSchema = z.object({
   npcId: idSchema,
 });
 
+/// A clue is a title and a body the players will read. The body is far more
+/// generous than a note: it is a handout, a letter, a page torn from a journal.
+const clueCoreSchema = z.object({
+  title: z.string().trim().min(1).max(120),
+  contentMarkdown: z.string().max(20000),
+});
+
+/// `kind` is absent on purpose: a game master only ever creates markdown, and
+/// accepting the field would invite an `image` the server cannot honour.
+export const createClueSchema = clueCoreSchema.partial({ contentMarkdown: true });
+
+export const patchClueSchema = clueCoreSchema.partial().refine(
+  (value) => Object.keys(value).length > 0,
+  { message: 'At least one field must be provided' },
+);
+
+/// The whole list, every time. An empty array is the legitimate way to take a
+/// clue back from everyone, so it must not be refused.
+export const setClueAccessSchema = z.object({
+  userIds: z.array(idSchema).max(50),
+});
+
+export const sessionClueParamsSchema = z.object({
+  id: idSchema,
+  clueId: idSchema,
+});
+
 /// The board arrives whole, as the opaque JSON the app already keeps on the
 /// device. The server checks that it is a JSON array and how big it is,
 /// nothing more: knowing the shape of a pawn is the client's job, and a
@@ -152,5 +179,8 @@ export type AttendanceInput = z.infer<typeof attendanceSchema>;
 export type AttendanceCharacterInput = z.infer<typeof attendanceCharacterSchema>;
 export type CreateNpcInput = z.infer<typeof createNpcSchema>;
 export type PatchNpcInput = z.infer<typeof patchNpcSchema>;
+export type CreateClueInput = z.infer<typeof createClueSchema>;
+export type PatchClueInput = z.infer<typeof patchClueSchema>;
+export type SetClueAccessInput = z.infer<typeof setClueAccessSchema>;
 export type MemberRole = z.infer<typeof memberRoleSchema>;
 export type AttendanceStatus = z.infer<typeof attendanceStatusSchema>;
