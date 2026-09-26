@@ -779,6 +779,12 @@ la supprimer.
 | `POST`   | `/sessions/:id/npcs`                           | En ajouter un (MJ, 201)                           |
 | `PATCH`  | `/sessions/:id/npcs/:npcId`                    | Nom, description (MJ)                             |
 | `DELETE` | `/sessions/:id/npcs/:npcId`                    | Le retirer (MJ, 204)                              |
+| `GET`    | `/sessions/:id/clues`                          | Les indices et leurs destinataires (MJ seul)      |
+| `POST`   | `/sessions/:id/clues`                          | En composer un, en markdown (MJ, 201)             |
+| `PATCH`  | `/sessions/:id/clues/:clueId`                  | Titre, contenu (MJ)                               |
+| `DELETE` | `/sessions/:id/clues/:clueId`                  | Le retirer (MJ, 204)                              |
+| `PUT`    | `/sessions/:id/clues/:clueId/access`           | `{ "userIds" }` — remplace la liste (MJ)          |
+| `GET`    | `/sessions/:id/clues/mine`                     | Les indices qu'on m'a ouverts, et eux seuls       |
 | `GET`    | `/sessions/:id/board`                          | Le plateau, lisible par toute la table            |
 | `PUT`    | `/sessions/:id/board`                          | Le remplacer entier (MJ)                          |
 | `GET`    | `/sessions/:id/board/live`                     | WebSocket : le plateau, puis chaque poussée       |
@@ -790,6 +796,39 @@ Le champ `nextSessionAt` d'une table ne désigne **que** des séances à venir, 
 vaut `null` s'il n'y en a aucune. Rien ne fait changer de statut une session une
 fois qu'elle a eu lieu : sans ce filtre, la plus ancienne séance `scheduled`
 resterait éternellement en tête et masquerait celle que les joueurs attendent.
+
+#### Les indices, et le premier destinataire du schéma
+
+Un indice est l'inverse d'un PNJ : préparé de la même façon, mais destiné à
+passer de l'autre côté de l'écran — un par un, et seulement à ceux que le MJ
+désigne. Comme les PNJ, il appartient à la séance et non à la table, et n'a pas
+de colonne de propriétaire : une séance n'a qu'un MJ.
+
+C'est **la première donnée de Questbook à porter un destinataire**. Le plateau
+est tout-ou-rien pour la table entière, les PNJ tout-ou-rien pour le MJ. D'où
+`session_clue_access`, une ligne par couple `(indice, joueur)`, où **l'absence
+de ligne est le défaut** : un indice n'est à personne tant que le MJ n'a rien
+fait.
+
+`PUT .../access` remplace la liste plutôt que d'y ajouter, parce que c'est le
+geste de l'écran : le MJ coche des noms et valide. Reprendre un indice est donc
+le même appel avec un nom de moins, et un tableau vide est la façon légitime de
+le reprendre à tout le monde — pas une erreur à refuser.
+
+`GET .../clues/mine` est la seule route ouverte à un joueur, et elle ne laisse
+**rien** filtrer du reste : ni compte, ni identifiant, ni trou dans un ordre. Ce
+que le MJ garde ne doit pas se deviner. Son DTO n'est d'ailleurs pas celui du MJ
+amputé de `sharedWith` : le champ n'existe pas de ce côté, sinon quelqu'un
+finira par l'envoyer vide au lieu de l'omettre.
+
+Attention à un piège que les cascades ne couvrent pas : **une permission pend au
+compte, pas à l'appartenance à la table**. Retirer un joueur ne la supprimerait
+donc pas, et son retour lui rendrait en silence tout ce qui lui avait été
+ouvert. `TableService.dropMembership` s'en charge, pour le départ volontaire
+comme pour le retrait par le MJ.
+
+Pas de temps réel ici : un joueur découvre ses indices en ouvrant son volet. Le
+canal WebSocket reste dédié au plateau.
 
 #### Le plateau, et pourquoi il est monté ici
 

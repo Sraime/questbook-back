@@ -2,18 +2,23 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { AppError } from '../../lib/errors.js';
 import { BoardService } from './board.service.js';
+import { ClueService } from './clue.service.js';
 import { NpcService } from './npc.service.js';
 import { SessionService } from './session.service.js';
 import {
   attendanceCharacterSchema,
   attendanceSchema,
+  createClueSchema,
   createNpcSchema,
+  patchClueSchema,
   patchNpcSchema,
   patchSessionSchema,
   replaceBoardSchema,
   sessionAttendeeParamsSchema,
+  sessionClueParamsSchema,
   sessionIdParamsSchema,
   sessionNpcParamsSchema,
+  setClueAccessSchema,
 } from './table.schemas.js';
 
 /// Sessions are created under their table (see `table.routes.ts`) but read and
@@ -22,6 +27,7 @@ const sessionRoutes: FastifyPluginAsync = async (fastify) => {
   const app = fastify.withTypeProvider<ZodTypeProvider>();
   const service = new SessionService(app.prisma, app.notifications);
   const npcs = new NpcService(app.prisma);
+  const clues = new ClueService(app.prisma);
   const boards = new BoardService(app.prisma);
 
   app.addHook('preHandler', app.authenticate);
@@ -125,6 +131,69 @@ const sessionRoutes: FastifyPluginAsync = async (fastify) => {
       await npcs.remove(request.user.sub, request.params.id, request.params.npcId);
       return reply.code(204).send();
     },
+  );
+
+  // --- Clues ---
+  //
+  // The inverse of the non-player characters above: prepared the same way, but
+  // meant to cross the screen. Composing stays game-master-only; `mine` is the
+  // one door a player knocks on, and it answers with their clues alone.
+
+  app.get(
+    '/:id/clues',
+    { schema: { params: sessionIdParamsSchema } },
+    async (request) => ({ clues: await clues.list(request.user.sub, request.params.id) }),
+  );
+
+  // Before `/:id/clues/:clueId`, or `mine` would be read as an id.
+  app.get(
+    '/:id/clues/mine',
+    { schema: { params: sessionIdParamsSchema } },
+    async (request) => ({
+      clues: await clues.listForPlayer(request.user.sub, request.params.id),
+    }),
+  );
+
+  app.post(
+    '/:id/clues',
+    { schema: { params: sessionIdParamsSchema, body: createClueSchema } },
+    async (request, reply) => {
+      const clue = await clues.create(request.user.sub, request.params.id, request.body);
+      return reply.code(201).send(clue);
+    },
+  );
+
+  app.patch(
+    '/:id/clues/:clueId',
+    { schema: { params: sessionClueParamsSchema, body: patchClueSchema } },
+    async (request) =>
+      clues.patch(
+        request.user.sub,
+        request.params.id,
+        request.params.clueId,
+        request.body,
+      ),
+  );
+
+  app.delete(
+    '/:id/clues/:clueId',
+    { schema: { params: sessionClueParamsSchema } },
+    async (request, reply) => {
+      await clues.remove(request.user.sub, request.params.id, request.params.clueId);
+      return reply.code(204).send();
+    },
+  );
+
+  app.put(
+    '/:id/clues/:clueId/access',
+    { schema: { params: sessionClueParamsSchema, body: setClueAccessSchema } },
+    async (request) =>
+      clues.setAccess(
+        request.user.sub,
+        request.params.id,
+        request.params.clueId,
+        request.body,
+      ),
   );
 
   // --- The board ---
