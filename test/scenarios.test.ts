@@ -33,12 +33,20 @@ async function insertScenario(options: {
       averageDurationMinutes: 180,
       rundownMarkdown: '## Mise en place\n\nDonner le télégramme.',
       grantOnSignup: options.grantOnSignup ?? false,
-      annexes: {
+      npcs: {
+        create: [
+          {
+            sortOrder: 0,
+            name: 'Mariette Le Goff',
+            description: 'La femme du gardien. Ment sur les dates.',
+          },
+        ],
+      },
+      clues: {
         create: [
           {
             sortOrder: 0,
             title: 'Télégramme',
-            kind: 'handout',
             contentMarkdown: 'GARDEN DISPARU STOP',
           },
         ],
@@ -102,11 +110,12 @@ describe('scenarios', () => {
     expect(body.id).toBe(starter.id);
     expect(body.context).toBe("Kerloc'h, 1924.");
     expect(body.rundownMarkdown).toContain('Mise en place');
-    expect(body.annexes).toHaveLength(1);
-    expect(body.annexes[0]).toMatchObject({
-      title: 'Télégramme',
-      kind: 'handout',
-    });
+    expect(body.clues).toHaveLength(1);
+    expect(body.clues[0]).toMatchObject({ title: 'Télégramme' });
+    // The cast travels with the document, so a scenario downloaded for an
+    // evening without network carries everything that evening needs.
+    expect(body.npcs).toHaveLength(1);
+    expect(body.npcs[0]).toMatchObject({ name: 'Mariette Le Goff' });
   });
 
   it('hides unowned and unknown scenarios behind the same 404', async () => {

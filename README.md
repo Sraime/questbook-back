@@ -128,7 +128,9 @@ garde une identité unique sur tous les appareils, sans table de correspondance.
 | `game_sessions`       | Séance : titre, description, date/heure, lieu, statut, scénario optionnel |
 | `session_attendances` | Réponses des joueurs (`yes` / `no`) et personnage joué, exigé pour un `yes` |
 | `scenarios`           | Catalogue de scénarios, écrits côté serveur (pas par les joueurs) |
-| `scenario_annexes`    | Cartes, indices, documents d'un scénario                          |
+| `scenario_npcs`       | Les PNJ qu'un scénario livre avec lui                             |
+| `scenario_clues`      | Les indices qu'un scénario livre avec lui (ex-`scenario_annexes`) |
+| `scenario_clue_access`| Qui, **dans quelle séance**, a reçu un indice du catalogue        |
 | `session_boards`      | La carte et les pions d'une session, tels que le MJ les a poussés   |
 | `scenario_ownerships` | Qui possède un scénario (`grant` à la connexion, `purchase` depuis la boutique) |
 | `shop_items`          | Catalogue de la boutique : titre, type, description, prix, clés d'image et d'asset |
@@ -830,6 +832,33 @@ comme pour le retrait par le MJ.
 Pas de temps réel ici : un joueur découvre ses indices en ouvrant son volet. Le
 canal WebSocket reste dédié au plateau.
 
+#### Ce que le scénario apporte à la séance
+
+Une séance qui déclare un scénario joue **deux piles à la fois** : ce que le
+catalogue livre, et ce que le MJ a écrit. `GET /sessions/:id/npcs` et
+`GET /sessions/:id/clues` renvoient les deux, celles du scénario d'abord, et
+chaque élément porte son `origin` — `scenario` ou `gameMaster`.
+
+**Rien n'est copié.** La séance lit le catalogue à chaque appel, si bien qu'une
+correction apportée à une aventure se voit le soir où on la joue. En échange,
+tout ce qui distingue les deux piles tient en une règle : `PATCH` et `DELETE`
+sur un élément du scénario répondent **400**, pas 404. Le MJ l'a sous les yeux ;
+lui dire « introuvable » l'enverrait chercher un bug là où il n'y a qu'une
+règle.
+
+Le partage, lui, fonctionne à l'identique sur les deux — c'est la raison d'être
+d'un indice livré avec l'aventure. Il lui fallait juste sa propre table :
+`scenario_clue_access` porte **la séance dans sa clé**, là où
+`session_clue_access` n'en a pas besoin. Le même carnet de la crique se
+transmet soir après soir, à d'autres tables, à d'autres gens, et rien de tout
+cela ne doit se suivre d'une séance à l'autre.
+
+Retirer ou changer le scénario d'une séance reprend ce qu'il avait distribué
+(`SessionService.patch` efface les lignes d'accès). Le MJ n'a jamais pu modifier
+ces indices, donc rien de son travail ne disparaît — alors qu'une permission
+oubliée laisserait un joueur relire le document d'une aventure qui ne se joue
+plus.
+
 #### Le plateau, et pourquoi il est monté ici
 
 Le plateau vivait sur l'appareil seul. Il est remonté le jour où un joueur a dû
@@ -976,13 +1005,20 @@ document.
 | Méthode | Route              | Description                                              |
 | ------- | ------------------ | -------------------------------------------------------- |
 | `GET`   | `/scenarios`       | Résumés des scénarios possédés (titre, description, jauge) |
-| `GET`   | `/scenarios/:id`   | Document complet + annexes, si possédé ; sinon 404       |
+| `GET`   | `/scenarios/:id`   | Document complet, PNJ et indices compris, si possédé ; sinon 404 |
 
 Personne ne crée de scénario par l'API : le catalogue est écrit en base
 (migration / admin). Les scénarios marqués `grant_on_signup` sont donnés à
 chaque compte à la connexion, pour que la liste ne soit pas vide ; les autres
 s'achètent à la boutique. Un id inconnu ou non possédé répond **404**, pas
 403 : le catalogue n'est pas public.
+
+Le document complet porte tout ce dont une soirée a besoin, PNJ et indices
+compris : l'app le stocke entier pour le lire hors ligne, et un second appel
+pour la distribution serait une seconde occasion de manquer à l'appel. Les
+**annexes** ont disparu au passage — elles étaient déjà des indices sans le
+nom, tout le catalogue n'en contenant que de type `clue` et `handout`, et
+`scenario_annexes` est devenue `scenario_clues`.
 
 ### Boutique
 
