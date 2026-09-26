@@ -52,8 +52,11 @@ export function createResendEmailSender(options: {
 export function createLoggingEmailSender(logger: FastifyBaseLogger): EmailSender {
   return {
     async send(message) {
+      // Le corps en clair, sans quoi la promesse ci-dessus n'en est pas une :
+      // c'est la seule copie du lien d'invitation, dont seul le hash est en
+      // base. Ce sender ne tourne qu'en l'absence de cle d'API.
       logger.info(
-        { subject: message.subject },
+        { subject: message.subject, to: message.to, text: message.text },
         'Email not sent: no RESEND_API_KEY configured',
       );
     },
