@@ -12,6 +12,7 @@
     "dev:admin": "tsx watch src/admin.ts",
     "admin:create": "tsx src/admin/cli/create-admin.ts",
     "admin:totp": "tsx src/admin/cli/totp-code.ts",
+    "scenario:import": "tsx src/admin/cli/import-scenario.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "start:admin": "node dist/admin.js",
