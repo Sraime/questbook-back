@@ -2,6 +2,19 @@ import { z } from 'zod';
 
 export const scenarioIdParamsSchema = z.object({ id: z.string().uuid() });
 
+export const scenarioOwnerParamsSchema = z.object({
+  id: z.string().uuid(),
+  userId: z.string().uuid(),
+});
+
+/// Le courriel n'est pas valide par une expression reguliere : les comptes de
+/// demonstration s'appellent `mj-xxxx@local`, qu'aucune definition d'adresse
+/// ne laisse passer. La recherche en base tranche mieux qu'un motif — soit un
+/// compte porte cette adresse, soit aucun, et le message le dit.
+export const grantScenarioSchema = z.object({
+  email: z.string().trim().min(1).max(320),
+});
+
 /// Un PNJ ou un indice porte son `id` quand il existe deja, et rien quand il
 /// vient d'etre ajoute dans le formulaire. C'est ce qui permet de reecrire un
 /// scenario entier sans donner a ses enfants de nouveaux identifiants — ceux
@@ -78,3 +91,4 @@ export const updateScenarioSchema = z
 
 export type CreateScenarioInput = z.infer<typeof createScenarioSchema>;
 export type UpdateScenarioInput = z.infer<typeof updateScenarioSchema>;
+export type GrantScenarioInput = z.infer<typeof grantScenarioSchema>;

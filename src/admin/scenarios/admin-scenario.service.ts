@@ -53,6 +53,29 @@ export interface AdminScenarioDetail {
   shopItems: number;
 }
 
+export interface AdminScenarioOwner {
+  userId: string;
+  email: string;
+  /// Absent tant qu'un compte n'a pas choisi de pseudo : c'est le courriel qui
+  /// identifie, le pseudo qui aide a reconnaitre.
+  displayName: string | null;
+  /// `grant` pour un don ou le cadeau de bienvenue, `purchase` pour un achat.
+  source: string;
+  grantedAt: string;
+}
+
+export interface AdminScenarioOwners {
+  /// Tous les detenteurs, pas seulement ceux de la liste ci-dessous.
+  total: number;
+  owners: AdminScenarioOwner[];
+}
+
+/// Une aventure offerte a l'inscription appartient a autant de comptes que la
+/// base en compte. La fiche en montre les derniers arrives et annonce le
+/// reste : une liste de dix mille lignes ne se lit pas, et un `findMany` sans
+/// borne finit par tomber.
+const OWNERS_SHOWN = 50;
+
 type ChildInput = { id?: string };
 
 /// Le catalogue, ecrit depuis le backoffice plutot qu'a la main dans une
@@ -272,6 +295,124 @@ export class AdminScenarioService {
     });
 
     return this.detail(id);
+  }
+
+  async owners(id: string): Promise<AdminScenarioOwners> {
+    const scenario = await this.prisma.scenario.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!scenario) {
+      throw notFound('Scenario introuvable');
+    }
+
+    const [total, rows] = await Promise.all([
+      this.prisma.scenarioOwnership.count({ where: { scenarioId: id } }),
+      this.prisma.scenarioOwnership.findMany({
+        where: { scenarioId: id },
+        orderBy: { grantedAt: 'desc' },
+        take: OWNERS_SHOWN,
+        include: { user: { select: { id: true, email: true, displayName: true } } },
+      }),
+    ]);
+
+    return {
+      total,
+      owners: rows.map((row) => ({
+        userId: row.user.id,
+        email: row.user.email,
+        displayName: row.user.displayName,
+        source: row.source,
+        grantedAt: row.grantedAt.toISOString(),
+      })),
+    };
+  }
+
+  /// Offre l'aventure a un compte.
+  ///
+  /// Redonner ce que quelqu'un possede deja ne fait rien et ne se plaint pas :
+  /// l'ecran affiche une liste, et cliquer deux fois sur le meme courriel est
+  /// une maladresse, pas une erreur a signaler.
+  async grant(id: string, adminId: string, email: string): Promise<AdminScenarioOwners> {
+    const scenario = await this.prisma.scenario.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!scenario) {
+      throw notFound('Scenario introuvable');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      select: { id: true },
+    });
+
+    if (!user) {
+      throw notFound('Aucun compte ne porte ce courriel');
+    }
+
+    const already = await this.prisma.scenarioOwnership.findUnique({
+      where: { userId_scenarioId: { userId: user.id, scenarioId: id } },
+      select: { id: true },
+    });
+
+    if (!already) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.scenarioOwnership.create({
+          data: { userId: user.id, scenarioId: id, source: 'grant' },
+        });
+
+        await recordAudit(tx, {
+          adminId,
+          action: 'scenario.grant',
+          targetType: 'scenario',
+          targetId: id,
+          details: { userId: user.id, email },
+        });
+      });
+    }
+
+    return this.owners(id);
+  }
+
+  /// Reprend un don.
+  ///
+  /// **Un achat ne se reprend pas ici.** Rembourser est une autre histoire,
+  /// qui passe par la boutique ; retirer la ligne de propriete se contenterait
+  /// de faire disparaitre de l'ecran une aventure payee.
+  ///
+  /// Reprendre n'efface rien sur l'appareil : une copie deja telechargee reste
+  /// lisible hors ligne. C'est l'acces au catalogue qui se ferme, pas la
+  /// memoire du telephone.
+  async revoke(id: string, adminId: string, userId: string): Promise<AdminScenarioOwners> {
+    const ownership = await this.prisma.scenarioOwnership.findUnique({
+      where: { userId_scenarioId: { userId, scenarioId: id } },
+      select: { id: true, source: true, user: { select: { email: true } } },
+    });
+
+    if (!ownership) {
+      throw notFound('Ce compte ne possede pas cette aventure');
+    }
+
+    if (ownership.source === 'purchase') {
+      throw badRequest("Cette aventure a ete achetee : un achat ne se reprend pas ici");
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.scenarioOwnership.delete({ where: { id: ownership.id } });
+
+      await recordAudit(tx, {
+        adminId,
+        action: 'scenario.revoke',
+        targetType: 'scenario',
+        targetId: id,
+        details: { userId, email: ownership.user.email },
+      });
+    });
+
+    return this.owners(id);
   }
 }
 
