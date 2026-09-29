@@ -593,6 +593,9 @@ avec ce qu'elle trace ne vaudrait rien.
 | `GET`   | `/admin/scenarios/:id` | Le document entier, PNJ et indices compris   |
 | `POST`  | `/admin/scenarios`     | Écrit une aventure (201)                     |
 | `PATCH` | `/admin/scenarios/:id` | Corrige tout ou partie de celle-ci           |
+| `GET`    | `/admin/scenarios/:id/owners`         | Qui la possède           |
+| `POST`   | `/admin/scenarios/:id/owners`         | La donne à un compte     |
+| `DELETE` | `/admin/scenarios/:id/owners/:userId` | Reprend un don           |
 
 Le catalogue n'avait jusqu'ici aucun autre moyen d'exister qu'un `INSERT`
 écrit à la main dans une migration : les trois aventures livrées sont arrivées
@@ -632,7 +635,58 @@ L'ordre d'affichage n'est pas demandé, c'est celui du tableau reçu.
 `grantOnSignup` offre l'aventure à tout le monde : `grantStarterScenarios`
 tourne à chaque connexion, donc chaque compte la reçoit à la suivante.
 
-Les actions journalisées sont `scenario.create` et `scenario.update`.
+#### Donner une aventure à un compte
+
+`grantOnSignup` ne connaît que personne ou tout le monde, et la boutique
+n'écrit dans `scenario_ownerships` qu'au terme d'un achat, donc sur un article
+visible de tous. Une aventure destinée à **un compte nommé** n'avait aucun
+chemin : le bloc « Qui la possède » de la fiche en ouvre un, par courriel.
+
+La liste est plafonnée à cinquante détenteurs, les derniers arrivés d'abord,
+et le total est donné à côté : une aventure offerte à l'inscription appartient
+à autant de comptes que la base en compte, et une fiche n'a pas à les afficher
+tous.
+
+Trois choses que l'écran dit plutôt que de les subir :
+
+- **Un achat ne se reprend pas ici.** Rembourser est une autre histoire, et un
+  clic de trop ne doit pas retirer à quelqu'un ce qu'il a payé. La ligne n'a
+  donc pas de bouton, et l'API refuse la requête.
+- **Reprendre n'a aucun effet durable sur une aventure offerte à
+  l'inscription** : la prochaine ouverture de l'écran des scénarios la
+  redonnerait.
+- **Reprendre n'efface rien sur l'appareil.** C'est l'accès au catalogue qui
+  se ferme ; une copie déjà téléchargée reste lisible hors ligne.
+
+Redonner ce qu'un compte possède déjà ne fait rien et ne s'en plaint pas : la
+liste ne doit pas doubler parce qu'on a cliqué deux fois.
+
+Les actions journalisées sont `scenario.create`, `scenario.update`,
+`scenario.grant` et `scenario.revoke`.
+
+#### Importer une aventure entière
+
+Un formulaire n'est pas l'outil pour saisir dix-huit pages, seize PNJ et neuf
+indices. Une commande lit un document JSON et l'écrit dans le catalogue :
+
+```bash
+npm run scenario:import -- --pour robin@exemple.fr < document.json
+```
+
+Le document arrive **sur l'entrée standard**, jamais par un chemin : le texte
+d'une aventure du commerce n'a rien à faire sur le disque du serveur, ni dans
+ce dépôt, qui est public. `grantOnSignup` y est forcé à faux, un courriel
+inconnu arrête tout avant la moindre écriture, et un titre déjà présent est
+refusé sauf `--remplacer` — qui réécrit le contenu, date l'aventure, et
+renumérote les indices, donc oublie qui avait reçu quoi.
+
+Sur le VPS, la commande vit dans l'image, comme la création d'un compte
+d'administration :
+
+```bash
+ssh ... "cd /opt/questbook && docker compose exec -T api \
+  node dist/admin/cli/import-scenario.js --pour robin@exemple.fr" < document.json
+```
 
 ### Créer un compte
 
