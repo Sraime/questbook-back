@@ -624,3 +624,45 @@ button.link.destructive {
 .save button {
   border-color: var(--accent);
 }
+
+/* Les detenteurs d'une aventure. Une ligne par compte, le geste a droite :
+   la liste se parcourt du regard sans que les boutons ne la hachent. */
+.owners .give {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.8rem 0 0.4rem;
+}
+.owners .give input {
+  flex: 1;
+}
+.owners ul {
+  list-style: none;
+  margin: 0.8rem 0 0;
+  padding: 0;
+}
+.owners li {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--bord);
+}
+.owners .who {
+  display: flex;
+  flex-direction: column;
+  /* Ce qui pousse la date et le bouton au bord oppose. */
+  flex: 1;
+  min-width: 0;
+}
+.owners .who em {
+  font-style: normal;
+  font-size: 0.8rem;
+  color: var(--doux);
+}
+.owners .small {
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+.owners p.small {
+  margin: 0.6rem 0 0;
+}

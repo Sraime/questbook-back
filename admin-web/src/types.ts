@@ -93,6 +93,22 @@ export interface ScenarioDetail {
   shopItems: number;
 }
 
+export interface ScenarioOwner {
+  userId: string;
+  email: string;
+  displayName: string | null;
+  /// `grant` pour un don ou le cadeau de bienvenue, `purchase` pour un achat.
+  source: string;
+  grantedAt: string;
+}
+
+/// `total` compte tous les detenteurs, `owners` n'en montre que les derniers
+/// arrives : une aventure offerte a l'inscription appartient a toute la base.
+export interface ScenarioOwners {
+  total: number;
+  owners: ScenarioOwner[];
+}
+
 export interface UserDetail {
   id: string;
   email: string;

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from './api';
 import { formatDate } from './format';
+import { ScenarioOwners } from './ScenarioOwners';
 import type { ScenarioDetail } from './types';
 
 interface ScenarioEditorProps {
@@ -273,6 +274,19 @@ export function ScenarioEditor({
           </span>
         </label>
       </div>
+
+      {/* La case ci-dessus donne l'aventure a tout le monde, ce bloc a
+          quelqu'un : les deux chemins vers un catalogue se lisent d'affilee.
+          L'etat affiche est celui qui est enregistre, pas la case cochee a
+          l'instant — sinon l'avertissement mentirait tant qu'on n'a pas
+          enregistre. */}
+      {scenario !== null && (
+        <ScenarioOwners
+          scenarioId={scenario.id}
+          grantOnSignup={scenario.grantOnSignup}
+          onError={onError}
+        />
+      )}
 
       <div className="block">
         <h3>Contexte</h3>

@@ -277,3 +277,137 @@ describe('the catalogue as a whole', () => {
     expect(response.statusCode).toBe(404);
   });
 });
+
+describe('giving an adventure to an account', () => {
+  const owners = (id: string) =>
+    admin.inject({ method: 'GET', url: `/admin/scenarios/${id}/owners`, headers: authHeader });
+
+  const give = (id: string, email: string) =>
+    admin.inject({
+      method: 'POST',
+      url: `/admin/scenarios/${id}/owners`,
+      headers: authHeader,
+      payload: { email },
+    });
+
+  const takeBack = (id: string, userId: string) =>
+    admin.inject({
+      method: 'DELETE',
+      url: `/admin/scenarios/${id}/owners/${userId}`,
+      headers: authHeader,
+    });
+
+  const readAsPlayer = (accessToken: string, id: string) =>
+    product.app.inject({
+      method: 'GET',
+      url: `/api/v1/scenarios/${id}`,
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+
+  it('opens an adventure that the account could not see, and closes it again', async () => {
+    const created = (await create()).json();
+    const player = await signIn(product, 'joueuse');
+
+    expect((await readAsPlayer(player.accessToken, created.id)).statusCode).toBe(404);
+
+    const given = await give(created.id, player.email);
+
+    expect(given.statusCode).toBe(200);
+    expect(given.json()).toMatchObject({ total: 1 });
+    expect(given.json().owners[0]).toMatchObject({
+      userId: player.userId,
+      email: player.email,
+      source: 'grant',
+    });
+    expect((await readAsPlayer(player.accessToken, created.id)).statusCode).toBe(200);
+
+    const taken = await takeBack(created.id, player.userId);
+
+    expect(taken.statusCode).toBe(200);
+    expect(taken.json()).toMatchObject({ total: 0, owners: [] });
+    expect((await readAsPlayer(player.accessToken, created.id)).statusCode).toBe(404);
+  });
+
+  it('refuses a courriel that belongs to nobody, and writes nothing', async () => {
+    const created = (await create()).json();
+
+    const response = await give(created.id, 'personne@exemple.fr');
+
+    expect(response.statusCode).toBe(404);
+    expect((await owners(created.id)).json().total).toBe(0);
+    expect(await auditFor('scenario.grant')).toEqual([]);
+  });
+
+  // Un clic de trop sur le meme courriel est une maladresse, pas une erreur :
+  // l'ecran montre une liste, et la liste ne doit pas doubler.
+  it('gives twice without duplicating the line', async () => {
+    const created = (await create()).json();
+    const player = await signIn(product, 'joueuse');
+
+    await give(created.id, player.email);
+    const again = await give(created.id, player.email);
+
+    expect(again.statusCode).toBe(200);
+    expect(again.json().total).toBe(1);
+    expect(await auditFor('scenario.grant')).toHaveLength(1);
+  });
+
+  it('refuses to take back what was bought', async () => {
+    const created = (await create()).json();
+    const player = await signIn(product, 'joueuse');
+    await prisma.scenarioOwnership.create({
+      data: { userId: player.userId, scenarioId: created.id, source: 'purchase' },
+    });
+
+    const response = await takeBack(created.id, player.userId);
+
+    expect(response.statusCode).toBe(400);
+    expect((await owners(created.id)).json().total).toBe(1);
+    expect((await readAsPlayer(player.accessToken, created.id)).statusCode).toBe(200);
+  });
+
+  it('refuses to take back from an account that never had it', async () => {
+    const created = (await create()).json();
+    const player = await signIn(product, 'joueuse');
+
+    expect((await takeBack(created.id, player.userId)).statusCode).toBe(404);
+  });
+
+  it('names both gestures in the audit log', async () => {
+    const created = (await create()).json();
+    const player = await signIn(product, 'joueuse');
+
+    await give(created.id, player.email);
+    await takeBack(created.id, player.userId);
+
+    const entries = await prisma.adminAuditEntry.findMany({
+      where: { action: { in: ['scenario.grant', 'scenario.revoke'] } },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    expect(entries.map((entry) => entry.action)).toEqual([
+      'scenario.grant',
+      'scenario.revoke',
+    ]);
+    expect(entries.every((entry) => entry.adminId === account.id)).toBe(true);
+    expect(JSON.parse(entries[0].details!)).toMatchObject({ email: player.email });
+  });
+
+  it('answers nothing without a session', async () => {
+    const created = (await create()).json();
+
+    expect(
+      (await admin.inject({ method: 'GET', url: `/admin/scenarios/${created.id}/owners` }))
+        .statusCode,
+    ).toBe(401);
+    expect(
+      (
+        await admin.inject({
+          method: 'POST',
+          url: `/admin/scenarios/${created.id}/owners`,
+          payload: { email: 'quiconque@exemple.fr' },
+        })
+      ).statusCode,
+    ).toBe(401);
+  });
+});
