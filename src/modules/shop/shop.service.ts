@@ -19,6 +19,8 @@ export interface ShopItemSummaryDto {
   /// derives the tokens an account may pose from this one listing, rather
   /// than asking again item by item.
   assetKey: string | null;
+  /// False once withdrawn. Only an owner still sees such an article.
+  available: boolean;
   owned: boolean;
 }
 
@@ -34,6 +36,7 @@ const summarySelect = {
   priceCents: true,
   imageKey: true,
   assetKey: true,
+  available: true,
 } as const;
 
 const detailSelect = {
@@ -47,8 +50,13 @@ export class ShopService {
   /// The whole catalogue, owned or not — unlike scenarios, whose list is only
   /// what you hold. A shop that hid what you have not bought would have
   /// nothing to sell.
+  ///
+  /// A withdrawn article stays in the list of whoever owns it: the app reads
+  /// the tokens an account may pose from this listing, and withdrawing an
+  /// article must not take it back from those who have it.
   async list(userId: string): Promise<ShopItemSummaryDto[]> {
     const rows = await this.prisma.shopItem.findMany({
+      where: { OR: [{ available: true }, { ownerships: { some: { userId } } }] },
       select: {
         ...summarySelect,
         ownerships: { where: { userId }, select: { id: true } },
@@ -88,11 +96,24 @@ export class ShopService {
   async purchase(userId: string, itemId: string): Promise<ShopItemDetailDto> {
     const item = await this.prisma.shopItem.findUnique({
       where: { id: itemId },
-      select: { id: true, type: true, priceCents: true, scenarioId: true },
+      select: {
+        id: true,
+        type: true,
+        priceCents: true,
+        scenarioId: true,
+        available: true,
+        ownerships: { where: { userId }, select: { id: true } },
+      },
     });
 
     if (!item) {
       throw notFound('Shop item not found');
+    }
+
+    // Already owned stays idempotent: a double tap that lands after the
+    // withdrawal must not turn into an error.
+    if (!item.available && item.ownerships.length === 0) {
+      throw badRequest('This item is no longer for sale');
     }
 
     // A pack has no content model yet. Letting it through would grant

@@ -666,3 +666,40 @@ button.link.destructive {
 .owners p.small {
   margin: 0.6rem 0 0;
 }
+
+/* Les assets. L'image se montre dans un cercle, comme dans le tiroir du
+   meneur : un dessin qui deborde se voit ici avant de se voir sur un plateau. */
+.queue li button.asset-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+.asset-thumb,
+.asset-empty {
+  flex: none;
+  border-radius: 50%;
+  object-fit: contain;
+  background: var(--fond);
+  border: 1px solid var(--bord);
+}
+.asset-empty {
+  display: inline-block;
+  width: 96px;
+  height: 96px;
+}
+.asset-image {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.9rem;
+}
+.asset-image img {
+  border-radius: 50%;
+  object-fit: contain;
+  background: var(--fond);
+  border: 1px solid var(--bord);
+}
+.asset-image input[type='file'] {
+  display: block;
+  margin-top: 0.4rem;
+}

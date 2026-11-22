@@ -103,6 +103,7 @@ describe('shop', () => {
         priceCents: 0,
         imageKey: 'logo_mark',
         assetKey: 'grand_ancien',
+        available: true,
         owned: false,
       },
       {
@@ -113,6 +114,7 @@ describe('shop', () => {
         priceCents: 0,
         imageKey: 'logo_mark',
         assetKey: null,
+        available: true,
         owned: false,
       },
     ]);
