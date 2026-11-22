@@ -10,6 +10,7 @@ import adminAuthPlugin from './plugins/admin-auth.js';
 import adminAuthRoutes from './auth/admin-auth.routes.js';
 import adminReportRoutes from './reports/admin-report.routes.js';
 import adminScenarioRoutes from './scenarios/admin-scenario.routes.js';
+import adminAssetRoutes from './assets/admin-asset.routes.js';
 import adminUserRoutes from './users/admin-user.routes.js';
 
 export interface BuildAdminAppOptions {
@@ -104,6 +105,7 @@ export async function buildAdminApp(
   await app.register(adminReportRoutes, { prefix: '/admin/reports' });
   await app.register(adminUserRoutes, { prefix: '/admin/users' });
   await app.register(adminScenarioRoutes, { prefix: '/admin/scenarios' });
+  await app.register(adminAssetRoutes, { prefix: '/admin/assets' });
 
   return app;
 }

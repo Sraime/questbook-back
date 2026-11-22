@@ -109,6 +109,23 @@ export interface ScenarioOwners {
   owners: ScenarioOwner[];
 }
 
+export type AssetKind = 'character' | 'environment' | 'effect';
+
+/// Un article `asset` de la boutique et le pion qu'il vend. `hosted` est faux
+/// pour ceux qu'embarque l'app : ils n'ont ici ni nature ni image.
+export interface AdminAsset {
+  itemId: string;
+  key: string;
+  title: string;
+  description: string;
+  kind: AssetKind | null;
+  hosted: boolean;
+  imageHash: string | null;
+  available: boolean;
+  owners: number;
+  updatedAt: string;
+}
+
 export interface UserDetail {
   id: string;
   email: string;

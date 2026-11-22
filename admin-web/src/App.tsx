@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, forgetToken, readToken, SessionExpired } from './api';
+import { AssetCatalogue } from './AssetCatalogue';
 import { ReportDetail } from './ReportDetail';
 import { ReportQueue } from './ReportQueue';
 import { ScenarioCatalogue } from './ScenarioCatalogue';
@@ -16,7 +17,7 @@ type Status = 'open' | 'resolved';
 /// colonne ferait de la seconde un onglet qu'on n'ouvre jamais. Ecrire le
 /// catalogue est plus etranger encore — c'est du produit, pas de la
 /// moderation — mais cela reclame le meme compte et la meme porte.
-type View = 'reports' | 'suspended' | 'scenarios';
+type View = 'reports' | 'suspended' | 'scenarios' | 'assets';
 
 export function App() {
   const [admin, setAdmin] = useState<Admin | null>(null);
@@ -125,6 +126,12 @@ export function App() {
           >
             Scénarios
           </button>
+          <button
+            className={view === 'assets' ? 'active' : ''}
+            onClick={() => setView('assets')}
+          >
+            Assets
+          </button>
         </nav>
 
         <span className="spacer" />
@@ -146,6 +153,8 @@ export function App() {
       {view === 'suspended' && <SuspendedList onError={handle} />}
 
       {view === 'scenarios' && <ScenarioCatalogue onError={handle} />}
+
+      {view === 'assets' && <AssetCatalogue onError={handle} />}
 
       {view === 'reports' && (
       <div className="columns">

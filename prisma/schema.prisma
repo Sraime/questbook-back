@@ -429,6 +429,10 @@ model ShopItem {
   assetKey    String?  @map("asset_key")
   scenarioId  String?  @map("scenario_id")
   sortOrder   Int      @default(0) @map("sort_order")
+  /// Whether the shop still sells it. An article is withdrawn rather than
+  /// deleted: deleting would cascade into who owns it, and a token already
+  /// on a board must keep its drawing.
+  available   Boolean  @default(true)
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
@@ -437,6 +441,34 @@ model ShopItem {
 
   @@index([sortOrder])
   @@map("shop_items")
+}
+
+/// A token whose drawing the server hosts, written from the backoffice.
+///
+/// The tokens bundled with the app (`grand_ancien`) have no row here: their
+/// drawing ships in the binary, and an `asset` shop item names them by key
+/// all the same. A row here is what lets an asset reach players without a
+/// release.
+///
+/// The image lives in the database rather than on disk: `pg_dump` already
+/// backs it up, and the API containers stay stateless. Tokens are small
+/// pictures, capped on upload.
+model Asset {
+  /// What a placed token remembers, so it never changes once written.
+  key       String   @id
+  name      String
+  /// `character`, `environment` or `effect`, the wire values of the app's
+  /// `BoardTokenKind`. Zones are drawn, never illustrated.
+  kind      String
+  image     Bytes
+  imageType String   @map("image_type")
+  /// SHA-256 of `image`. The app names its cached copy after it, so a new
+  /// picture is fetched once and an unchanged one never again.
+  imageHash String   @map("image_hash")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("assets")
 }
 
 /// Who bought what. Mirrors [ScenarioOwnership], which stays the authority on

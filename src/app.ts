@@ -20,6 +20,7 @@ import sessionRoutes from './modules/tables/session.routes.js';
 import tableRoutes from './modules/tables/table.routes.js';
 import scenarioRoutes from './modules/scenarios/scenario.routes.js';
 import shopRoutes from './modules/shop/shop.routes.js';
+import assetRoutes from './modules/assets/asset.routes.js';
 import reportRoutes, { blockRoutes } from './modules/moderation/report.routes.js';
 import type { AppleVerifier } from './modules/auth/apple-verifier.js';
 import type { GoogleVerifier } from './modules/auth/google-verifier.js';
@@ -172,6 +173,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(deviceRoutes, { prefix: '/api/v1/devices' });
   await app.register(scenarioRoutes, { prefix: '/api/v1/scenarios' });
   await app.register(shopRoutes, { prefix: '/api/v1/shop' });
+  await app.register(assetRoutes, { prefix: '/api/v1/assets' });
   await app.register(reportRoutes, {
     reportsEmailTo: env.REPORTS_EMAIL_TO,
     prefix: '/api/v1/reports',
