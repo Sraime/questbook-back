@@ -9,6 +9,11 @@ import type {
 } from '@prisma/client';
 import { conflict, notFound } from '../../lib/errors.js';
 import type {
+  NotificationDraft,
+  NotificationService,
+} from '../notifications/notification.service.js';
+import { releaseCharacterFromSessions } from '../tables/session.release.js';
+import type {
   CreateCharacterInput,
   PatchCharacterInput,
   PatchInventoryItemInput,
@@ -118,7 +123,10 @@ export async function readSharedCharacter(
 }
 
 export class CharacterService {
-  constructor(private readonly prisma: PrismaClient) {}
+  constructor(
+    private readonly prisma: PrismaClient,
+    private readonly notifications: NotificationService,
+  ) {}
 
   /// Without `since`, returns the user's live characters. With `since`, returns
   /// everything touched after that instant *including tombstones*, which is
@@ -210,7 +218,17 @@ export class CharacterService {
       deletedAt: input.deletedAt ? new Date(input.deletedAt) : null,
     };
 
+    // The app deletes by pushing its tombstone, so this is where most
+    // deletions arrive, not through `softDelete`.
+    const deleting = data.deletedAt !== null && existing?.deletedAt == null;
+    let drafts: NotificationDraft[] = [];
+
     const row = await this.prisma.$transaction(async (tx) => {
+      if (deleting && existing) {
+        drafts = await releaseCharacterFromSessions(tx, userId, id);
+        await this.notifications.record(tx, drafts);
+      }
+
       if (existing) {
         await tx.characterStat.deleteMany({ where: { characterId: id } });
         await tx.characterResource.deleteMany({ where: { characterId: id } });
@@ -239,6 +257,8 @@ export class CharacterService {
       return tx.character.findUniqueOrThrow({ where: { id }, include: childrenInclude });
     });
 
+    this.notifications.deliver(drafts);
+
     return { character: toCharacterDto(row), created: existing === null };
   }
 
@@ -264,10 +284,18 @@ export class CharacterService {
     await this.requireOwned(userId, id);
 
     const now = new Date();
-    await this.prisma.character.update({
-      where: { id },
-      data: { deletedAt: now, updatedAt: now },
+    const drafts = await this.prisma.$transaction(async (tx) => {
+      await tx.character.update({
+        where: { id },
+        data: { deletedAt: now, updatedAt: now },
+      });
+
+      const released = await releaseCharacterFromSessions(tx, userId, id, now);
+      await this.notifications.record(tx, released);
+      return released;
     });
+
+    this.notifications.deliver(drafts);
   }
 
   async addInventoryItem(

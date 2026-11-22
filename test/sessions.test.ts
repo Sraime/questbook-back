@@ -506,30 +506,6 @@ describe('Participation', () => {
     expect(response.statusCode).toBe(409);
   });
 
-  it('reads a deleted character as no character at all', async () => {
-    const { gm, player, tableId } = await tableWithPlayer();
-    const session = await scheduleSession(gm, tableId);
-    const character = await createCharacter(player);
-
-    await answer(player, session.id, { status: 'yes', characterId: character.id });
-
-    await context.app.inject({
-      method: 'DELETE',
-      url: `/api/v1/characters/${character.id}`,
-      headers: player.authHeader,
-    });
-
-    const asGm = await context.app.inject({
-      method: 'GET',
-      url: `/api/v1/sessions/${session.id}`,
-      headers: gm.authHeader,
-    });
-
-    // The answer survives its character: the player still said they would come.
-    expect(asGm.json().attendances).toHaveLength(1);
-    expect(asGm.json().attendances[0].character).toBeNull();
-  });
-
   it('opens a registered character to the others at the table', async () => {
     const { gm, player, tableId } = await tableWithPlayer();
     const session = await scheduleSession(gm, tableId);
@@ -615,6 +591,187 @@ describe('Participation', () => {
     });
 
     expect(response.statusCode).toBe(409);
+  });
+});
+
+describe('Deleting an investigator', () => {
+  async function deleteCharacter(as: SignedInUser, characterId: string) {
+    const response = await context.app.inject({
+      method: 'DELETE',
+      url: `/api/v1/characters/${characterId}`,
+      headers: as.authHeader,
+    });
+    expect(response.statusCode).toBe(204);
+  }
+
+  /// How the app actually deletes: it pushes the sheet with its tombstone.
+  async function pushTombstone(as: SignedInUser, character: { id: string }) {
+    const later = new Date(Date.now() + 1000).toISOString();
+    const response = await context.app.inject({
+      method: 'PUT',
+      url: `/api/v1/characters/${character.id}`,
+      headers: as.authHeader,
+      payload: characterPayload({ updatedAt: later, deletedAt: later }),
+    });
+    expect(response.statusCode).toBe(200);
+  }
+
+  /// Moves a session into its evening: answers are closed, the session is not.
+  async function startSession(sessionId: string) {
+    const hour = 60 * 60 * 1000;
+    await prisma.gameSession.update({
+      where: { id: sessionId },
+      data: {
+        startsAt: new Date(Date.now() - 2 * hour),
+        createdAt: new Date(Date.now() - 3 * hour),
+      },
+    });
+  }
+
+  async function attendanceRows(sessionId: string) {
+    return prisma.sessionAttendance.findMany({ where: { sessionId } });
+  }
+
+  it('withdraws the player from a session still open to answers', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+    const character = await createCharacter(player);
+    await answer(player, session.id, { status: 'yes', characterId: character.id });
+
+    await deleteCharacter(player, character.id);
+
+    expect(await attendanceRows(session.id)).toEqual([]);
+  });
+
+  it('does the same when the deletion arrives through sync', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+    const character = await createCharacter(player);
+    await answer(player, session.id, { status: 'yes', characterId: character.id });
+
+    await pushTombstone(player, character);
+
+    expect(await attendanceRows(session.id)).toEqual([]);
+  });
+
+  it('tells the game master the player is no longer coming', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+    const character = await createCharacter(player);
+    await answer(player, session.id, { status: 'yes', characterId: character.id });
+
+    await deleteCharacter(player, character.id);
+
+    const latest = (await notifications(gm))[0];
+    expect(latest.type).toBe('attendance_changed');
+    expect(latest.body).toContain('Ernest Blackwood');
+    expect(latest.body).toContain("n'est plus inscrit");
+  });
+
+  it('lets the player sign up again with another investigator', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+    const first = await createCharacter(player);
+    await answer(player, session.id, { status: 'yes', characterId: first.id });
+    await deleteCharacter(player, first.id);
+
+    const second = await createCharacter(player, { name: 'Harvey Walters' });
+    const response = await answer(player, session.id, {
+      status: 'yes',
+      characterId: second.id,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().myCharacter.name).toBe('Harvey Walters');
+  });
+
+  it('keeps the seat of a player once the evening has begun', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+    const first = await createCharacter(player);
+    await answer(player, session.id, { status: 'yes', characterId: first.id });
+    await startSession(session.id);
+
+    await deleteCharacter(player, first.id);
+
+    const rows = await attendanceRows(session.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe('yes');
+    expect(rows[0].characterId).toBeNull();
+    expect((await notifications(gm))[0].type).toBe('attendance_character_changed');
+
+    // Answers are closed, naming another investigator is not.
+    const second = await createCharacter(player, { name: 'Harvey Walters' });
+    const response = await setCharacter(player, session.id, second.id);
+    expect(response.statusCode).toBe(200);
+  });
+
+  it('detaches the investigator of a refusal without bothering the game master', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+    const character = await createCharacter(player);
+    await answer(player, session.id, { status: 'no', characterId: character.id });
+    const before = (await notifications(gm)).length;
+
+    await deleteCharacter(player, character.id);
+
+    const rows = await attendanceRows(session.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe('no');
+    expect(rows[0].characterId).toBeNull();
+    expect(await notifications(gm)).toHaveLength(before);
+  });
+
+  it('leaves past sessions as they were played', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const past = await scheduleSession(gm, tableId, {
+      startsAt: '2026-01-05T19:00:00.000Z',
+    });
+    const character = await createCharacter(player);
+    await answer(player, past.id, { status: 'yes', characterId: character.id });
+
+    await deleteCharacter(player, character.id);
+
+    const rows = await attendanceRows(past.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].characterId).toBe(character.id);
+
+    // The sheet is gone all the same: the session reads it as no character.
+    const asGm = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/sessions/${past.id}`,
+      headers: gm.authHeader,
+    });
+    expect(asGm.json().attendances[0].character).toBeNull();
+  });
+
+  it('leaves cancelled sessions alone', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+    const character = await createCharacter(player);
+    await answer(player, session.id, { status: 'yes', characterId: character.id });
+    await context.app.inject({
+      method: 'DELETE',
+      url: `/api/v1/sessions/${session.id}`,
+      headers: gm.authHeader,
+    });
+
+    await deleteCharacter(player, character.id);
+
+    expect(await attendanceRows(session.id)).toHaveLength(1);
+  });
+
+  it('does not release anything twice when the tombstone is pushed again', async () => {
+    const { gm, player, tableId } = await tableWithPlayer();
+    const session = await scheduleSession(gm, tableId);
+    const character = await createCharacter(player);
+    await answer(player, session.id, { status: 'yes', characterId: character.id });
+    await deleteCharacter(player, character.id);
+    const before = (await notifications(gm)).length;
+
+    await pushTombstone(player, character);
+
+    expect(await notifications(gm)).toHaveLength(before);
   });
 });
 

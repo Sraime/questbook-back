@@ -18,7 +18,7 @@ import {
 
 const characterRoutes: FastifyPluginAsync = async (fastify) => {
   const app = fastify.withTypeProvider<ZodTypeProvider>();
-  const service = new CharacterService(app.prisma);
+  const service = new CharacterService(app.prisma, app.notifications);
 
   // Every route below belongs to the authenticated user, no exceptions.
   app.addHook('preHandler', app.authenticate);
