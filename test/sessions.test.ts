@@ -12,6 +12,11 @@ import { createTable, joinTable } from './helpers/tables.js';
 
 let context: TestContext;
 
+/// Far enough ahead to stay upcoming: the API compares to the real clock, and
+/// a date written as "next month" ends up in the past and flips the tests.
+const UPCOMING = '2099-10-12T19:00:00.000Z';
+const UPCOMING_MOVED = '2099-10-19T19:00:00.000Z';
+
 beforeEach(async () => {
   await resetDatabase();
   context = await createTestApp();
@@ -43,7 +48,7 @@ async function scheduleSession(
     payload: {
       title: 'Le manoir Corbitt',
       description: 'Apportez vos fiches',
-      startsAt: '2026-10-12T19:00:00.000Z',
+      startsAt: UPCOMING,
       location: 'Chez Robin',
       ...overrides,
     },
@@ -127,7 +132,7 @@ describe('Sessions', () => {
       headers: player.authHeader,
       payload: {
         title: 'Ma session',
-        startsAt: '2026-10-12T19:00:00.000Z',
+        startsAt: UPCOMING,
         location: 'Chez moi',
       },
     });
@@ -145,7 +150,7 @@ describe('Sessions', () => {
       headers: gm.authHeader,
     });
 
-    expect(table.json().nextSessionAt).toBe('2026-10-12T19:00:00.000Z');
+    expect(table.json().nextSessionAt).toBe(UPCOMING);
   });
 
   it('stops calling a session that already happened the next date', async () => {
@@ -174,7 +179,7 @@ describe('Sessions', () => {
       headers: gm.authHeader,
     });
 
-    expect(table.json().nextSessionAt).toBe('2026-10-12T19:00:00.000Z');
+    expect(table.json().nextSessionAt).toBe(UPCOMING);
   });
 
   it('notifies members when the date moves', async () => {
@@ -185,11 +190,11 @@ describe('Sessions', () => {
       method: 'PATCH',
       url: `/api/v1/sessions/${session.id}`,
       headers: gm.authHeader,
-      payload: { startsAt: '2026-10-19T19:00:00.000Z' },
+      payload: { startsAt: UPCOMING_MOVED },
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json().startsAt).toBe('2026-10-19T19:00:00.000Z');
+    expect(response.json().startsAt).toBe(UPCOMING_MOVED);
     expect(await notificationTypes(player)).toContain('session_updated');
   });
 
