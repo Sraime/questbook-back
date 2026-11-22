@@ -898,6 +898,19 @@ la supprimer.
 Le MJ n'est pas un participant : il anime la séance, ne répond pas et n'est pas
 compté parmi les joueurs attendus. `PUT /sessions/:id/attendance` lui répond 403.
 
+Supprimer un investigateur le retire des séances encore vivantes, que la
+suppression arrive par `DELETE /characters/:id` ou par la pierre tombale que
+pousse la synchro (le chemin de l'app). Venir, c'est venir avec quelqu'un :
+
+| Séance | Effet | MJ prévenu |
+| --- | --- | --- |
+| Inscriptions ouvertes, réponse `yes` | inscription retirée, le joueur peut se réinscrire | oui |
+| Partie lancée (inscriptions closes, séance pas close) | place gardée, investigateur détaché, un autre peut être nommé | oui |
+| Réponse `no` | investigateur détaché | non |
+| Passée ou annulée | rien : elle raconte ce qui a eu lieu | non |
+
+Le code vit dans `tables/session.release.ts`.
+
 Le champ `nextSessionAt` d'une table ne désigne **que** des séances à venir, et
 vaut `null` s'il n'y en a aucune. Rien ne fait changer de statut une session une
 fois qu'elle a eu lieu : sans ce filtre, la plus ancienne séance `scheduled`
