@@ -679,13 +679,22 @@ pour l'article. L'onglet « Assets » le fait sans rien de tout cela.
 | `POST`  | `/admin/assets`          | Ajoute un asset et l'article qui le vend                 |
 | `PATCH` | `/admin/assets/:id`      | Nom, description, nature, disponibilité, image           |
 
-Un asset a un **nom** — celui du pion dans le tiroir du meneur et celui de
-l'article, qui vont ensemble —, une **nature** (personnage, environnement,
-effet : le rayon où le meneur le trouve), une **description** pour la
-boutique et une **image** : PNG, JPEG ou WebP, 2 Mo au plus. Le format est lu
-dans les premiers octets, jamais pris sur parole, puisque l'image est ensuite
-servie à tous les joueurs avec ce type. Elle voyage en base64 dans le JSON,
-d'où une limite de corps relevée à 4 Mo sur ces deux routes.
+Un asset a un **nom** — celui du tiroir du meneur et celui de l'article, qui
+vont ensemble —, une **nature**, une **description** pour la boutique et une
+**image** : PNG, JPEG ou WebP. Le format est lu dans les premiers octets,
+jamais pris sur parole, puisque l'image est ensuite servie à tous les joueurs
+avec ce type. Elle voyage en base64 dans le JSON, d'où une limite de corps
+relevée à 8 Mo sur ces deux routes.
+
+La nature dit ce qu'est l'asset :
+
+- **personnage, environnement, effet** : un pion, rangé dans le rayon du même
+  nom. Son image, 2 Mo au plus, s'affiche dans un cercle.
+- **carte** (`map`) : un fond de plateau, proposé à côté du manoir et de la
+  grille. Son image, 5 Mo au plus, couvre tout le plateau, qui en prend les
+  proportions : `width` et `height` sont lus dans l'en-tête de l'image et
+  servis avec elle. Une carte reste une carte — un plateau retient l'une comme
+  fond et l'autre comme pion, et la nature ne passe pas de l'un à l'autre.
 
 L'image vit **en base**, dans `assets.image`, pas sur un disque : `pg_dump` la
 sauvegarde déjà, et les conteneurs restent sans état. `image_hash`, son
@@ -1243,7 +1252,7 @@ d'ailleurs, de deux endroits selon le pion :
 
 | Méthode | Route                | Description                                            |
 | ------- | -------------------- | ------------------------------------------------------ |
-| `GET`   | `/assets`            | Tous les assets hébergés : clé, nom, nature, `imageHash` |
+| `GET`   | `/assets`            | Tous les assets hébergés : clé, nom, nature, `imageHash`, `width`, `height` |
 | `GET`   | `/assets/:key/image` | L'image, avec un `ETag` qui épargne un second téléchargement |
 
 **Cette liste ne dépend ni de la possession ni de la vente.** Un joueur

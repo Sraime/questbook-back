@@ -6,7 +6,7 @@ export const assetItemParamsSchema = z.object({ id: z.string().uuid() });
 /// L'image voyage en base64 dans le JSON, comme tout le reste de cette API :
 /// le front n'a qu'une facon d'appeler, et un pion pese trop peu pour que le
 /// tiers de plus compte. Sa taille et son format sont verifies apres decodage.
-const imageSchema = z.string().min(1).max(3_000_000);
+const imageSchema = z.string().min(1).max(7_200_000);
 
 const assetFields = {
   name: z.string().trim().min(1).max(80),

@@ -2,9 +2,11 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { badRequest, notFound } from '../../lib/errors.js';
 import {
   hashImage,
-  MAX_ASSET_IMAGE_BYTES,
+  imageSize,
+  maxImageBytes,
   sniffImageType,
   type AssetImage,
+  type AssetKind,
 } from '../../modules/assets/asset.image.js';
 import { recordAudit } from '../audit.js';
 import type { CreateAssetInput, UpdateAssetInput } from './admin-asset.schemas.js';
@@ -23,6 +25,10 @@ export interface AdminAsset {
   kind: string | null;
   hosted: boolean;
   imageHash: string | null;
+  /// Les dimensions de l'image, en pixels : celles d'une carte font les
+  /// proportions du plateau.
+  width: number | null;
+  height: number | null;
   available: boolean;
   owners: number;
   updatedAt: string;
@@ -31,7 +37,15 @@ export interface AdminAsset {
 const itemInclude = { _count: { select: { ownerships: true } } } as const;
 
 type ItemRow = Prisma.ShopItemGetPayload<{ include: typeof itemInclude }>;
-type AssetRow = { key: string; kind: string; imageHash: string };
+type AssetRow = {
+  key: string;
+  kind: string;
+  imageHash: string;
+  width: number | null;
+  height: number | null;
+};
+
+type DecodedImage = AssetImage & { width: number; height: number };
 
 export class AdminAssetService {
   constructor(private readonly prisma: PrismaClient) {}
@@ -67,7 +81,7 @@ export class AdminAssetService {
   }
 
   async create(adminId: string, input: CreateAssetInput): Promise<AdminAsset> {
-    const image = decodeImage(input.image);
+    const image = decodeImage(input.image, input.kind);
     const key = await this.freeKey(input.name);
     const last = await this.prisma.shopItem.aggregate({ _max: { sortOrder: true } });
 
@@ -80,6 +94,8 @@ export class AdminAssetService {
           image: new Uint8Array(image.bytes),
           imageType: image.type,
           imageHash: image.hash,
+          width: image.width,
+          height: image.height,
         },
       });
 
@@ -117,7 +133,7 @@ export class AdminAssetService {
     const asset = item.assetKey
       ? await this.prisma.asset.findUnique({
           where: { key: item.assetKey },
-          select: { key: true },
+          select: { key: true, kind: true },
         })
       : null;
 
@@ -129,7 +145,14 @@ export class AdminAssetService {
       );
     }
 
-    const image = input.image === undefined ? null : decodeImage(input.image);
+    // Un plateau retient une carte comme fond et un pion comme pion : une cle
+    // qui passerait de l'un a l'autre laisserait des plateaux incoherents.
+    const kind = (input.kind ?? asset?.kind) as AssetKind;
+    if (asset && (asset.kind === 'map') !== (kind === 'map')) {
+      throw badRequest('Une carte reste une carte, et un pion reste un pion');
+    }
+
+    const image = input.image === undefined ? null : decodeImage(input.image, kind);
 
     await this.prisma.$transaction(async (tx) => {
       await tx.shopItem.update({
@@ -152,6 +175,8 @@ export class AdminAssetService {
                   image: new Uint8Array(image.bytes),
                   imageType: image.type,
                   imageHash: image.hash,
+                  width: image.width,
+                  height: image.height,
                 }
               : {}),
           },
@@ -190,7 +215,7 @@ export class AdminAssetService {
     const keys = items.flatMap((item) => (item.assetKey ? [item.assetKey] : []));
     const rows = await this.prisma.asset.findMany({
       where: { key: { in: keys } },
-      select: { key: true, kind: true, imageHash: true },
+      select: { key: true, kind: true, imageHash: true, width: true, height: true },
     });
     return new Map(rows.map((row) => [row.key, row]));
   }
@@ -221,17 +246,20 @@ function toAdminAsset(item: ItemRow, asset: AssetRow | undefined): AdminAsset {
     kind: asset?.kind ?? null,
     hosted: asset !== undefined,
     imageHash: asset?.imageHash ?? null,
+    width: asset?.width ?? null,
+    height: asset?.height ?? null,
     available: item.available,
     owners: item._count.ownerships,
     updatedAt: item.updatedAt.toISOString(),
   };
 }
 
-function decodeImage(base64: string): AssetImage {
+function decodeImage(base64: string, kind: AssetKind): DecodedImage {
   const bytes = Buffer.from(base64, 'base64');
+  const max = maxImageBytes(kind);
 
-  if (bytes.length > MAX_ASSET_IMAGE_BYTES) {
-    throw badRequest('L\'image depasse 2 Mo');
+  if (bytes.length > max) {
+    throw badRequest(`L'image depasse ${max / 1024 / 1024} Mo`);
   }
 
   const type = sniffImageType(bytes);
@@ -239,7 +267,12 @@ function decodeImage(base64: string): AssetImage {
     throw badRequest('L\'image doit etre un PNG, un JPEG ou un WebP');
   }
 
-  return { bytes, type, hash: hashImage(bytes) };
+  const size = imageSize(bytes, type);
+  if (!size) {
+    throw badRequest('Les dimensions de l\'image sont illisibles');
+  }
+
+  return { bytes, type, hash: hashImage(bytes), ...size };
 }
 
 function slug(name: string): string {

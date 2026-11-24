@@ -458,10 +458,16 @@ model Asset {
   key       String   @id
   name      String
   /// `character`, `environment` or `effect`, the wire values of the app's
-  /// `BoardTokenKind`. Zones are drawn, never illustrated.
+  /// `BoardTokenKind` — zones are drawn, never illustrated — or `map`, a
+  /// board background rather than a token.
   kind      String
   image     Bytes
   imageType String   @map("image_type")
+  /// Read from the image itself. A board takes the proportions of its map,
+  /// or tokens would slide over a stretched picture. Null only on tokens
+  /// written before maps existed, which have no use for it.
+  width     Int?
+  height    Int?
   /// SHA-256 of `image`. The app names its cached copy after it, so a new
   /// picture is fetched once and an unchanged one never again.
   imageHash String   @map("image_hash")

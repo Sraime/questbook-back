@@ -8,6 +8,7 @@ export const kindLabels: Record<AssetKind, string> = {
   character: 'Personnage',
   environment: 'Environnement',
   effect: 'Effet',
+  map: 'Carte',
 };
 
 interface AssetEditorProps {
@@ -18,8 +19,8 @@ interface AssetEditorProps {
   onError: (cause: unknown) => void;
 }
 
-/// La meme limite que l'API, dite avant l'envoi plutot qu'apprise apres.
-const MAX_BYTES = 2 * 1024 * 1024;
+/// Les memes limites que l'API, dites avant l'envoi plutot qu'apprises apres.
+const maxMegabytes = (kind: AssetKind) => (kind === 'map' ? 5 : 2);
 const ACCEPTED = ['image/png', 'image/jpeg', 'image/webp'];
 
 interface Draft {
@@ -29,6 +30,7 @@ interface Draft {
   available: boolean;
   /// L'image choisie, en base64, tant qu'elle n'est pas enregistree.
   image: string | null;
+  imageBytes: number;
   preview: string | null;
 }
 
@@ -38,6 +40,7 @@ const from = (asset: AdminAsset | null): Draft => ({
   kind: asset?.kind ?? 'character',
   available: asset?.available ?? false,
   image: null,
+  imageBytes: 0,
   preview: null,
 });
 
@@ -52,6 +55,12 @@ export function AssetEditor({ asset, onSaved, onDirtyChange, onError }: AssetEdi
   const [saved, setSaved] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const editable = asset === null || asset.hosted;
+  const isMap = draft.kind === 'map';
+  // L'API refuse qu'une carte devienne un pion ou l'inverse : une fois cree,
+  // on ne choisit plus que parmi les natures de sa famille.
+  const kinds = (Object.keys(kindLabels) as AssetKind[]).filter(
+    (kind) => asset === null || (kind === 'map') === (asset.kind === 'map'),
+  );
 
   const change = (patch: Partial<Draft>) => {
     setDraft((current) => ({ ...current, ...patch }));
@@ -66,15 +75,21 @@ export function AssetEditor({ asset, onSaved, onDirtyChange, onError }: AssetEdi
       setFileError('Un PNG, un JPEG ou un WebP.');
       return;
     }
-    if (file.size > MAX_BYTES) {
-      setFileError('L’image dépasse 2 Mo.');
+    // La nature peut encore changer apres le choix du fichier : la limite se
+    // verifie aussi a l'enregistrement, ici on n'ecarte que l'impossible.
+    if (file.size > maxMegabytes('map') * 1024 * 1024) {
+      setFileError(`L’image dépasse ${maxMegabytes('map')} Mo.`);
       return;
     }
 
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = String(reader.result);
-      change({ image: dataUrl.slice(dataUrl.indexOf(',') + 1), preview: dataUrl });
+      change({
+        image: dataUrl.slice(dataUrl.indexOf(',') + 1),
+        imageBytes: file.size,
+        preview: dataUrl,
+      });
     };
     reader.readAsDataURL(file);
   };
@@ -84,7 +99,9 @@ export function AssetEditor({ asset, onSaved, onDirtyChange, onError }: AssetEdi
       ? 'Il faut un nom.'
       : asset === null && draft.image === null
         ? 'Il faut une image.'
-        : null;
+        : draft.imageBytes > maxMegabytes(draft.kind) * 1024 * 1024
+          ? `L’image d’un pion ne dépasse pas ${maxMegabytes(draft.kind)} Mo.`
+          : null;
 
   const save = async () => {
     if (incomplete !== null) return;
@@ -128,22 +145,33 @@ export function AssetEditor({ asset, onSaved, onDirtyChange, onError }: AssetEdi
       </header>
 
       <div className="block">
-        <h3>Le pion</h3>
+        <h3>{isMap ? 'La carte' : 'Le pion'}</h3>
 
         <div className="asset-image">
           {draft.preview !== null ? (
-            <img src={draft.preview} alt="" width={96} height={96} />
+            <img
+              className={isMap ? 'map' : undefined}
+              src={draft.preview}
+              alt=""
+              width={isMap ? 160 : 96}
+              height={isMap ? undefined : 96}
+            />
           ) : asset !== null ? (
-            <AssetPicture asset={asset} size={96} onError={onError} />
+            <AssetPicture asset={asset} size={isMap ? 160 : 96} onError={onError} />
           ) : (
             <span className="asset-empty" />
           )}
 
           {editable ? (
             <label className="note">
-              {asset === null ? 'Image' : 'Remplacer l’image'} — PNG, JPEG ou WebP, 2 Mo au
-              plus. Elle s’affiche dans un cercle : un sujet centré sur fond transparent rend
-              le mieux.
+              {asset === null ? 'Image' : 'Remplacer l’image'} — PNG, JPEG ou WebP,{' '}
+              {maxMegabytes(draft.kind)} Mo au plus.{' '}
+              {isMap
+                ? 'Elle couvre tout le plateau, qui en prend les proportions.'
+                : 'Elle s’affiche dans un cercle : un sujet centré sur fond transparent rend le mieux.'}
+              {asset !== null && asset.width !== null && asset.height !== null && (
+                <> Actuelle : {asset.width} × {asset.height} px.</>
+              )}
               <input
                 type="file"
                 accept={ACCEPTED.join(',')}
@@ -160,7 +188,7 @@ export function AssetEditor({ asset, onSaved, onDirtyChange, onError }: AssetEdi
         </div>
 
         <label className="note">
-          Nom — celui du pion dans le tiroir du meneur et de l’article en boutique
+          Nom — celui du tiroir du meneur et de l’article en boutique
           <input
             value={draft.name}
             onChange={(event) => change({ name: event.target.value })}
@@ -175,9 +203,9 @@ export function AssetEditor({ asset, onSaved, onDirtyChange, onError }: AssetEdi
               value={draft.kind}
               onChange={(event) => change({ kind: event.target.value as AssetKind })}
             >
-              {Object.entries(kindLabels).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
+              {kinds.map((kind) => (
+                <option key={kind} value={kind}>
+                  {kindLabels[kind]}
                 </option>
               ))}
             </select>
@@ -251,8 +279,15 @@ export function AssetPicture({ asset, size, onError }: AssetPictureProps) {
     // Le hash change avec l'image : c'est lui qui dit quand la recharger.
   }, [asset.itemId, asset.hosted, asset.imageHash, onError]);
 
+  // Une carte se montre en rectangle, aux proportions du plateau.
+  const map = asset.kind === 'map';
+  const height = map ? Math.round((size * 3) / 4) : size;
+  const className = map ? 'map' : '';
+
   if (src === null) {
-    return <span className="asset-empty" style={{ width: size, height: size }} />;
+    return <span className={`asset-empty ${className}`} style={{ width: size, height }} />;
   }
-  return <img className="asset-thumb" src={src} alt="" width={size} height={size} />;
+  return (
+    <img className={`asset-thumb ${className}`} src={src} alt="" width={size} height={height} />
+  );
 }

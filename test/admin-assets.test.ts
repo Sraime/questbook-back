@@ -220,6 +220,55 @@ describe('managing an asset', () => {
   });
 });
 
+describe('a map', () => {
+  /// A valid PNG header, 1 by 1, followed by enough padding to weigh what a
+  /// real map does: only the header is ever read.
+  const heavy = (megabytes: number) =>
+    Buffer.concat([PNG, Buffer.alloc(megabytes * 1024 * 1024)]).toString('base64');
+
+  it('is an asset like any other, with the size of its picture', async () => {
+    const response = await create(draft({ name: 'Crypte de Kingsport', kind: 'map' }));
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      key: 'crypte_de_kingsport',
+      kind: 'map',
+      width: 1,
+      height: 1,
+    });
+  });
+
+  it('may weigh more than a token', async () => {
+    expect((await create(draft({ kind: 'map', image: heavy(3) }))).statusCode).toBe(201);
+    expect((await create(draft({ kind: 'character', image: heavy(3) }))).statusCode).toBe(400);
+    // Refused by the body limit before validation even runs.
+    expect([400, 413]).toContain((await create(draft({ kind: 'map', image: heavy(6) }))).statusCode);
+  });
+
+  it('stays a map, and a token stays a token', async () => {
+    const map = (await create(draft({ name: 'Crypte', kind: 'map' }))).json();
+    const token = (await create(draft({ name: 'Goule', kind: 'character' }))).json();
+
+    expect((await update(map.itemId, { kind: 'character' })).statusCode).toBe(400);
+    expect((await update(token.itemId, { kind: 'map' })).statusCode).toBe(400);
+    // Between tokens, the kind is only a section of the drawer.
+    expect((await update(token.itemId, { kind: 'effect' })).statusCode).toBe(200);
+  });
+
+  it('reaches the app with its proportions', async () => {
+    await create(draft({ name: 'Crypte', kind: 'map' }));
+    const player = await signIn(product, 'player');
+
+    const response = await product.app.inject({
+      method: 'GET',
+      url: '/api/v1/assets',
+      headers: player.authHeader,
+    });
+
+    expect(response.json().assets[0]).toMatchObject({ key: 'crypte', kind: 'map', width: 1, height: 1 });
+  });
+});
+
 describe('the catalogue the app draws from', () => {
   it('lists every hosted asset, on sale or not', async () => {
     await create(draft({ available: true }));
