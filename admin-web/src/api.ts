@@ -85,3 +85,23 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
 
   return payload as T;
 }
+
+/// Une image servie derriere la session. Une balise `<img>` ne sait pas
+/// presenter le jeton : on la telecharge, et l'ecran en affiche une copie
+/// locale qu'il doit liberer par `URL.revokeObjectURL`.
+export async function imageUrl(path: string): Promise<string> {
+  const token = readToken();
+  if (token === null) throw new SessionExpired();
+
+  const response = await fetch(path, { headers: { authorization: `Bearer ${token}` } });
+
+  if (response.status === 401) {
+    forgetToken();
+    throw new SessionExpired();
+  }
+  if (!response.ok) {
+    throw new ApiError(response.status, 'UNKNOWN', `L'API a repondu ${response.status}.`);
+  }
+
+  return URL.createObjectURL(await response.blob());
+}

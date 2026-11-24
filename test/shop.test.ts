@@ -81,7 +81,7 @@ describe('shop', () => {
     const first = await insertItem({ title: 'Le Grand Ancien', sortOrder: 0 });
     const second = await insertItem({
       title: 'Pack de départ',
-      type: 'pack',
+      type: 'bundle',
       sortOrder: 1,
       assetKey: null,
     });
@@ -102,17 +102,21 @@ describe('shop', () => {
         description: "Le pion qui porte l'emblème de Questbook.",
         priceCents: 0,
         imageKey: 'logo_mark',
+        imageHash: null,
         assetKey: 'grand_ancien',
+        available: true,
         owned: false,
       },
       {
         id: second.id,
         title: 'Pack de départ',
-        type: 'pack',
+        type: 'bundle',
         description: "Le pion qui porte l'emblème de Questbook.",
         priceCents: 0,
         imageKey: 'logo_mark',
+        imageHash: null,
         assetKey: null,
+        available: true,
         owned: false,
       },
     ]);
@@ -252,16 +256,6 @@ describe('shop', () => {
     expect(await prisma.shopItemOwnership.count()).toBe(0);
   });
 
-  it('refuses a pack, which has no content to grant yet', async () => {
-    const item = await insertItem({ type: 'pack', assetKey: null });
-    const user = await signIn(context);
-
-    const response = await purchase(user.authHeader, item.id);
-
-    expect(response.statusCode).toBe(400);
-    expect(await prisma.shopItemOwnership.count()).toBe(0);
-  });
-
   it('answers 404 on an article that does not exist', async () => {
     const user = await signIn(context);
     const missing = '00000000-0000-4000-8000-000000000000';
@@ -275,5 +269,189 @@ describe('shop', () => {
 
     const bought = await purchase(user.authHeader, missing);
     expect(bought.statusCode).toBe(404);
+  });
+});
+
+describe('bundles', () => {
+  /// A bundle of one withdrawn token and one adventure that is sold on its
+  /// own as well — the two ways content reaches a bundle.
+  async function bundleWith(
+    title: string,
+    contents: { assetItemIds?: string[]; scenarioIds?: string[] },
+    over: { priceCents?: number; available?: boolean } = {},
+  ) {
+    const bundle = await prisma.shopItem.create({
+      data: {
+        title,
+        type: 'bundle',
+        description: 'Tout pour jouer.',
+        priceCents: over.priceCents ?? 0,
+        imageKey: 'bundle',
+        image: new Uint8Array([1, 2, 3]),
+        imageType: 'image/png',
+        imageHash: 'a'.repeat(64),
+        available: over.available ?? true,
+      },
+    });
+    const assets = contents.assetItemIds ?? [];
+    await prisma.shopBundleEntry.createMany({
+      data: [
+        ...assets.map((assetItemId, index) => ({
+          bundleId: bundle.id,
+          assetItemId,
+          sortOrder: index,
+        })),
+        ...(contents.scenarioIds ?? []).map((scenarioId, index) => ({
+          bundleId: bundle.id,
+          scenarioId,
+          sortOrder: assets.length + index,
+        })),
+      ],
+    });
+    return bundle;
+  }
+
+  async function catalogue() {
+    const scenario = await insertScenario();
+    const scenarioItem = await insertItem({
+      title: 'Le Phare de Kerloc’h',
+      type: 'scenario',
+      assetKey: null,
+      scenarioId: scenario.id,
+    });
+    const token = await prisma.shopItem.create({
+      data: {
+        title: 'Le gardien',
+        type: 'asset',
+        description: '',
+        imageKey: 'asset',
+        assetKey: 'gardien',
+        available: false,
+      },
+    });
+    return { scenario, scenarioItem, token };
+  }
+
+  it('hands over everything it holds, withdrawn content included', async () => {
+    const { scenario, scenarioItem, token } = await catalogue();
+    const bundle = await bundleWith('Le Phare, au complet', {
+      assetItemIds: [token.id],
+      scenarioIds: [scenario.id],
+    });
+    const user = await signIn(context);
+
+    const bought = await purchase(user.authHeader, bundle.id);
+
+    expect(bought.statusCode).toBe(200);
+    expect(bought.json().owned).toBe(true);
+    expect(bought.json().contents.every((entry: { owned: boolean }) => entry.owned)).toBe(true);
+
+    // The withdrawn token reaches the listing, which is where the app reads
+    // the tokens it may pose; the adventure's own article reads as owned.
+    const list = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/shop/items',
+      headers: user.authHeader,
+    });
+    const owned = list
+      .json()
+      .items.filter((item: { owned: boolean }) => item.owned)
+      .map((item: { id: string }) => item.id);
+    expect(owned.sort()).toEqual([bundle.id, scenarioItem.id, token.id].sort());
+
+    const scenarios = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/scenarios',
+      headers: user.authHeader,
+    });
+    expect(scenarios.json().scenarios.map((row: { id: string }) => row.id)).toEqual([
+      scenario.id,
+    ]);
+  });
+
+  it('says, item by item, what the reader already has', async () => {
+    const { scenario, token } = await catalogue();
+    const bundle = await bundleWith('Le Phare, au complet', {
+      assetItemIds: [token.id],
+      scenarioIds: [scenario.id],
+    });
+    const user = await signIn(context);
+    await prisma.scenarioOwnership.create({
+      data: { userId: user.userId, scenarioId: scenario.id },
+    });
+
+    const detail = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/shop/items/${bundle.id}`,
+      headers: user.authHeader,
+    });
+
+    expect(detail.json().contents).toEqual([
+      {
+        kind: 'asset',
+        title: 'Le gardien',
+        itemId: token.id,
+        assetKey: 'gardien',
+        scenarioId: null,
+        owned: false,
+      },
+      {
+        kind: 'scenario',
+        title: 'Le Phare de Kerloc’h',
+        itemId: null,
+        assetKey: null,
+        scenarioId: scenario.id,
+        owned: true,
+      },
+    ]);
+  });
+
+  it('overlaps another bundle without complaining', async () => {
+    const { scenario, token } = await catalogue();
+    const first = await bundleWith('Le Phare', { scenarioIds: [scenario.id] });
+    const second = await bundleWith('Le Phare, au complet', {
+      assetItemIds: [token.id],
+      scenarioIds: [scenario.id],
+    });
+    const user = await signIn(context);
+
+    expect((await purchase(user.authHeader, first.id)).statusCode).toBe(200);
+    const again = await purchase(user.authHeader, second.id);
+
+    expect(again.statusCode).toBe(200);
+    expect(await prisma.scenarioOwnership.count({ where: { userId: user.userId } })).toBe(1);
+  });
+
+  it('is priced by itself, not by what it holds', async () => {
+    const priced = await insertItem({ title: 'Payant', priceCents: 499, assetKey: 'payant' });
+    const bundle = await bundleWith('Gratuit', { assetItemIds: [priced.id] });
+    const user = await signIn(context);
+
+    expect((await purchase(user.authHeader, bundle.id)).statusCode).toBe(200);
+
+    const pricedBundle = await bundleWith('Cher', {}, { priceCents: 999 });
+    expect((await purchase(user.authHeader, pricedBundle.id)).statusCode).toBe(400);
+  });
+
+  it('serves its picture', async () => {
+    const bundle = await bundleWith('Le Phare', {});
+    const user = await signIn(context);
+
+    const image = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/shop/items/${bundle.id}/image`,
+      headers: user.authHeader,
+    });
+
+    expect(image.statusCode).toBe(200);
+    expect(image.headers['content-type']).toBe('image/png');
+    expect(image.rawPayload).toEqual(Buffer.from([1, 2, 3]));
+
+    const none = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/shop/items/${(await insertItem()).id}/image`,
+      headers: user.authHeader,
+    });
+    expect(none.statusCode).toBe(404);
   });
 });

@@ -134,8 +134,9 @@ garde une identité unique sur tous les appareils, sans table de correspondance.
 | `scenario_clue_access`| Qui, **dans quelle séance**, a reçu un indice du catalogue        |
 | `session_boards`      | La carte et les pions d'une session, tels que le MJ les a poussés   |
 | `scenario_ownerships` | Qui possède un scénario (`grant` à la connexion, `purchase` depuis la boutique) |
-| `shop_items`          | Catalogue de la boutique : titre, type, description, prix, clés d'image et d'asset |
+| `shop_items`          | Catalogue de la boutique : titre, type, description, prix, clés d'image et d'asset, disponibilité |
 | `shop_item_ownerships`| Qui a acheté quoi                                                 |
+| `assets`              | Les pions dont le serveur héberge l'image, ajoutés depuis le backoffice |
 | `device_tokens`       | Jetons FCM, un par appareil                                       |
 | `notifications`       | Historique consultable dans l'app                                 |
 | `reports`             | Signalements, leur instantané du contenu, et ce qu'en a décidé le support |
@@ -664,6 +665,84 @@ liste ne doit pas doubler parce qu'on a cliqué deux fois.
 Les actions journalisées sont `scenario.create`, `scenario.update`,
 `scenario.grant` et `scenario.revoke`.
 
+### Les bundles de la boutique
+
+L'onglet « Bundles » réunit, en un article, des assets et des scénarios qui
+existent déjà — en vente ou non : un pion fait pour une aventure n'a souvent
+aucune raison de se vendre seul, et le bundle est alors le seul moyen de
+l'obtenir.
+
+| Méthode | Route                     | Ce qu'elle fait                                    |
+| ------- | ------------------------- | -------------------------------------------------- |
+| `GET`   | `/admin/bundles`          | Les bundles, avec leur contenu                     |
+| `GET`   | `/admin/bundles/:id`      | Un bundle                                          |
+| `GET`   | `/admin/bundles/:id/image`| Son image, pour l'aperçu de l'écran                |
+| `POST`  | `/admin/bundles`          | Crée le bundle, retiré de la vente sauf avis contraire |
+| `PATCH` | `/admin/bundles/:id`      | Titre, description, prix, disponibilité, image, contenu |
+
+Le contenu se remplace d'un bloc. Le modifier ne reprend rien à ceux qui ont
+déjà le bundle, et ne leur donne pas non plus ce qui s'y ajoute. Les actions
+journalisées sont `bundle.create` et `bundle.update`.
+
+L'éditeur de scénario donne aussi à chaque PNJ un **pion par défaut**, parmi
+les quatre pions de joueur et les assets de nature personnage. La session le
+reprend tant que le MJ n'en a pas choisi un autre ; « Aucun » s'enregistre
+comme un choix, d'où la colonne `token` nullable de `session_npc_tokens`.
+
+### Les assets de la boutique
+
+Ajouter un pion demandait une release de l'app : une image sous `assets/`, une
+entrée dans `board_catalog.dart` et dans `shop_artwork.dart`, une migration
+pour l'article. L'onglet « Assets » le fait sans rien de tout cela.
+
+| Méthode | Route                    | Ce qu'elle fait                                         |
+| ------- | ------------------------ | ------------------------------------------------------- |
+| `GET`   | `/admin/assets`          | Les articles `asset` de la boutique, et l'asset de chacun |
+| `GET`   | `/admin/assets/:id`      | Un article, par l'identifiant de l'article               |
+| `GET`   | `/admin/assets/:id/image`| L'image hébergée, pour l'aperçu de l'écran               |
+| `POST`  | `/admin/assets`          | Ajoute un asset et l'article qui le vend                 |
+| `PATCH` | `/admin/assets/:id`      | Nom, description, nature, disponibilité, image           |
+
+Un asset a un **nom** — celui du tiroir du meneur et celui de l'article, qui
+vont ensemble —, une **nature**, une **description** pour la boutique et une
+**image** : PNG, JPEG ou WebP. Le format est lu dans les premiers octets,
+jamais pris sur parole, puisque l'image est ensuite servie à tous les joueurs
+avec ce type. Elle voyage en base64 dans le JSON, d'où une limite de corps
+relevée à 8 Mo sur ces deux routes.
+
+La nature dit ce qu'est l'asset :
+
+- **personnage, environnement, effet** : un pion, rangé dans le rayon du même
+  nom. Son image, 2 Mo au plus, s'affiche dans un cercle.
+- **carte** (`map`) : un fond de plateau, proposé à côté du manoir et de la
+  grille. Son image, 5 Mo au plus, couvre tout le plateau, qui en prend les
+  proportions : `width` et `height` sont lus dans l'en-tête de l'image et
+  servis avec elle. Une carte reste une carte — un plateau retient l'une comme
+  fond et l'autre comme pion, et la nature ne passe pas de l'un à l'autre.
+
+L'image vit **en base**, dans `assets.image`, pas sur un disque : `pg_dump` la
+sauvegarde déjà, et les conteneurs restent sans état. `image_hash`, son
+SHA-256, en est la version — l'app nomme sa copie d'après lui, et ne
+retélécharge qu'une image qui a changé.
+
+Ce qu'il faut savoir avant de cliquer :
+
+- **La clé se tire du nom, une fois pour toutes.** Un pion posé sur un plateau
+  s'en souvient : renommer l'asset ne la change pas. Elle ne croise jamais
+  celle d'un asset existant, embarqué compris (`grand_ancien_2`).
+- **Un asset naît hors de la vente**, sauf case cochée : on le voit dans le
+  backoffice avant que les joueurs ne le voient en boutique.
+- **Rien ne se supprime.** Supprimer un article effacerait en cascade qui le
+  possède. Décocher « En vente » le retire de la boutique ; ceux qui l'ont le
+  gardent, et il reste dessiné sur les plateaux.
+- **Un asset embarqué dans l'app** (le Grand Ancien) n'a ici ni image ni
+  nature : son dessin est dans le binaire. Seuls son titre, sa description et
+  sa disponibilité se règlent ; le reste est refusé.
+- **Le prix reste nul** : la boutique refuse de vendre ce qui a un prix tant
+  que le paiement n'existe pas.
+
+Les actions journalisées sont `asset.create` et `asset.update`.
+
 #### Importer une aventure entière
 
 Un formulaire n'est pas l'outil pour saisir dix-huit pages, seize PNJ et neuf
@@ -885,6 +964,8 @@ la supprimer.
 | `POST`   | `/sessions/:id/npcs`                           | En ajouter un (MJ, 201)                           |
 | `PATCH`  | `/sessions/:id/npcs/:npcId`                    | Nom, description (MJ)                             |
 | `DELETE` | `/sessions/:id/npcs/:npcId`                    | Le retirer (MJ, 204)                              |
+| `PUT`    | `/sessions/:id/npcs/:npcId/token`              | Son pion pour la séance, `null` pour l'ôter (MJ)  |
+| `PUT`    | `/sessions/:id/attendances/:userId/token`      | Pion de l'investigateur pour la séance (MJ)       |
 | `GET`    | `/sessions/:id/clues`                          | Les indices et leurs destinataires (MJ seul)      |
 | `POST`   | `/sessions/:id/clues`                          | En composer un, en markdown (MJ, 201)             |
 | `PATCH`  | `/sessions/:id/clues/:clueId`                  | Titre, contenu (MJ)                               |
@@ -897,6 +978,19 @@ la supprimer.
 
 Le MJ n'est pas un participant : il anime la séance, ne répond pas et n'est pas
 compté parmi les joueurs attendus. `PUT /sessions/:id/attendance` lui répond 403.
+
+Supprimer un investigateur le retire des séances encore vivantes, que la
+suppression arrive par `DELETE /characters/:id` ou par la pierre tombale que
+pousse la synchro (le chemin de l'app). Venir, c'est venir avec quelqu'un :
+
+| Séance | Effet | MJ prévenu |
+| --- | --- | --- |
+| Inscriptions ouvertes, réponse `yes` | inscription retirée, le joueur peut se réinscrire | oui |
+| Partie lancée (inscriptions closes, séance pas close) | place gardée, investigateur détaché, un autre peut être nommé | oui |
+| Réponse `no` | investigateur détaché | non |
+| Passée ou annulée | rien : elle raconte ce qui a eu lieu | non |
+
+Le code vit dans `tables/session.release.ts`.
 
 Le champ `nextSessionAt` d'une table ne désigne **que** des séances à venir, et
 vaut `null` s'il n'y en a aucune. Rien ne fait changer de statut une session une
@@ -956,6 +1050,35 @@ d'un indice livré avec l'aventure. Il lui fallait juste sa propre table :
 `session_clue_access` n'en a pas besoin. Le même carnet de la crique se
 transmet soir après soir, à d'autres tables, à d'autres gens, et rien de tout
 cela ne doit se suivre d'une séance à l'autre.
+
+#### Le pion d'un personnage
+
+Pour une séance, le MJ peut donner **un pion** à chaque investigateur et à
+chaque PNJ : celui qui les représente sur son plateau, et que son tiroir propose
+sous leur nom. **C'est le MJ qui choisit, et pour cette séance seulement** : le
+plateau est le sien, le joueur n'y pose rien, et la fiche d'un investigateur ne
+porte aucun pion. La référence a deux formes, validées par
+`src/lib/token-ref.ts` : `asset:<clé>` pour un pion de la boutique,
+`socle:<couleur>` pour l'un des quatre que l'app donne à tous, qui n'ont pas de
+clé. La propriété n'est pas vérifiée : l'app ne propose que ce que le MJ
+possède, et une référence vers autre chose se dessinerait seulement en pion
+simple.
+
+- **Celui de l'investigateur** vit sur sa participation,
+  `session_attendances.token`, et se pose par
+  `PUT /sessions/:id/attendances/:userId/token` (MJ seul, 404 pour un joueur qui
+  n'a pas dit qui il joue). Chaque participation du détail d'une session le
+  porte. **Il tombe quand le joueur change d'investigateur** : il avait été
+  choisi pour l'autre.
+- **Celui du PNJ** vit dans `session_npc_tokens`, une
+  table à part parce que les PNJ du scénario refusent toute modification mais
+  doivent pouvoir recevoir un pion. Sa route est donc distincte du `PATCH`, et
+  ouverte aux deux origines. `npc_id` désigne indifféremment une ligne de
+  `session_npcs` ou de `scenario_npcs`, d'où l'absence de clé étrangère : la
+  ligne part avec la séance, ou avec le PNJ quand le MJ le retire.
+
+Le pion posé sur le plateau garde, lui, le lien vers son personnage dans le JSON
+de `session_boards.tokens`, que le serveur ne lit pas.
 
 Retirer ou changer le scénario d'une séance reprend ce qu'il avait distribué
 (`SessionService.patch` efface les lignes d'accès). Le MJ n'a jamais pu modifier
@@ -1150,7 +1273,8 @@ rangé dans la copie locale et celui que la liste vient de rendre : **deux dates
 | Méthode | Route                      | Description                                        |
 | ------- | -------------------------- | -------------------------------------------------- |
 | `GET`   | `/shop/items`              | Tout le catalogue, chaque article portant `owned`  |
-| `GET`   | `/shop/items/:id`          | Détail d'un article, `scenario_id` compris         |
+| `GET`   | `/shop/items/:id`          | Détail d'un article, `scenario_id` et `contents` compris |
+| `GET`   | `/shop/items/:id/image`    | L'image propre d'un article — celle d'un bundle    |
 | `POST`  | `/shop/items/:id/purchase` | Accorde l'article et le renvoie possédé            |
 
 Trois partis pris valent d'être connus.
@@ -1158,7 +1282,11 @@ Trois partis pris valent d'être connus.
 **La liste montre tout, possédé ou non** — l'inverse des scénarios, dont on ne
 voit que ce qu'on détient. Une boutique qui cacherait ce qu'on n'a pas acheté
 n'aurait rien à vendre. C'est `owned` qui fait disparaître le bouton d'achat,
-d'où sa présence dès le résumé.
+d'où sa présence dès le résumé. Seule exception : un article **retiré de la
+vente** (`available` faux) ne se montre plus qu'à qui le possède — l'app lit
+dans cette liste les pions qu'un compte peut poser, et retirer un article ne
+doit le reprendre à personne. L'acheter est refusé, sauf pour un possesseur,
+pour qui un second achat reste sans effet.
 
 **La description voyage dès le résumé**, ce qui n'a pas toujours été le cas :
 elle était réservée au détail, jusqu'à ce que l'app affiche les scénarios
@@ -1170,17 +1298,42 @@ qu'il avait en plus, `scenario_id`.
 double appui ne doit pas faire surgir une erreur, et le jour où de l'argent
 changera de main, c'est exactement la propriété qu'on voudra.
 
-**Le serveur ne décrit pas à quoi ressemble un pion.** Son rendu appartient à
-l'app, comme le montre déjà `board_catalog.dart` ; un article de type `asset`
-n'en porte que la clé. Même chose pour `image_key`, qui nomme une image
-embarquée dans l'app et non une URL : rien ici n'héberge de fichier.
+**Un article de type `asset` ne porte que la clé du pion.** Le dessin vient
+d'ailleurs, de deux endroits selon le pion :
+
+- **embarqué dans l'app** pour le Grand Ancien : `image_key` nomme alors une
+  image du binaire, résolue par `shop_artwork.dart` ;
+- **hébergé ici** pour ceux ajoutés depuis le backoffice : `image_key` vaut
+  `asset`, et l'image se demande à l'API ci-dessous.
+
+| Méthode | Route                | Description                                            |
+| ------- | -------------------- | ------------------------------------------------------ |
+| `GET`   | `/assets`            | Tous les assets hébergés : clé, nom, nature, `imageHash`, `width`, `height` |
+| `GET`   | `/assets/:key/image` | L'image, avec un `ETag` qui épargne un second téléchargement |
+
+**Cette liste ne dépend ni de la possession ni de la vente.** Un joueur
+regarde les pions que pose le meneur : les dessiner ne peut dépendre ni de
+les avoir achetés, ni de ce qu'ils soient encore en vente.
 
 Acheter un article de type `scenario` écrit une ligne dans
 `scenario_ownerships` avec `source: 'purchase'` — la lecture d'un scénario
 reste gardée par cette table, si bien que rien en aval n'a à connaître
-l'existence de la boutique. Le type `pack` n'a pas encore de contenu
-modélisé et son achat est refusé. Un article au prix non nul l'est aussi, tant
+l'existence de la boutique. Un article au prix non nul est refusé, tant
 qu'aucun paiement n'existe : sans ce garde-fou, il serait donné.
+
+**Un bundle donne tout ce qu'il contient.** Son contenu vit dans
+`shop_bundle_entries` : des articles `asset` et des scénarios qui existent
+déjà, en vente ou non. L'obtenir écrit la possession du bundle, de chacun de
+ses articles `asset` (`source: 'bundle'`), de chacun de ses scénarios dans
+`scenario_ownerships`, et des articles `scenario` qui vendent ces mêmes
+aventures — sans quoi la boutique continuerait de proposer ce qu'on a déjà.
+Seul le prix du bundle compte, pas celui de ce qu'il contient. Deux bundles
+qui se recoupent ne font aucune erreur : ce qui est déjà possédé est ignoré.
+
+Le détail d'un bundle liste son contenu dans `contents`, chaque élément
+portant son propre `owned`. Un bundle a son image, envoyée depuis le
+backoffice et servie par `/shop/items/:id/image` ; `imageHash` la signale dès
+le résumé, et l'app nomme sa copie d'après lui.
 
 **Deux scénarios sont en rayon**, semés par
 `20260921120000_shop_scenarios` : « Le Dernier Train de Nuit » et
@@ -1639,8 +1792,9 @@ vérification que chaque événement produit bien la notification et l'e-mail
 attendus via les doublures. Côté boutique : catalogue visible en entier,
 description réservée au détail, achat qui rend l'article possédé sans
 contaminer les autres comptes, second achat sans erreur ni ligne en double,
-achat d'un scénario qui le fait apparaître dans `/scenarios`, et refus d'un
-article payant comme d'un `pack`.
+achat d'un scénario qui le fait apparaître dans `/scenarios`, refus d'un
+article payant, et bundles qui donnent tout leur contenu, se recoupent sans
+erreur et disent élément par élément ce qui est déjà possédé.
 
 Les suites partagent une base et la vident entre chaque test : elles s'exécutent
 donc en série (`fileParallelism: false`).

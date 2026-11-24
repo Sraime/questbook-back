@@ -63,6 +63,9 @@ export interface ScenarioNpc {
   id: string;
   name: string;
   description: string;
+  /// Le pion que la seance lui donne d'office : `asset:<cle>` ou
+  /// `socle:<couleur>`.
+  token: string | null;
 }
 
 export interface ScenarioClue {
@@ -107,6 +110,47 @@ export interface ScenarioOwner {
 export interface ScenarioOwners {
   total: number;
   owners: ScenarioOwner[];
+}
+
+export type AssetKind = 'character' | 'environment' | 'effect' | 'map';
+
+/// Un article `asset` de la boutique et le pion ou la carte qu'il vend.
+/// `hosted` est faux pour ceux qu'embarque l'app : ils n'ont ici ni nature ni
+/// image.
+export interface AdminAsset {
+  itemId: string;
+  key: string;
+  title: string;
+  description: string;
+  kind: AssetKind | null;
+  hosted: boolean;
+  imageHash: string | null;
+  width: number | null;
+  height: number | null;
+  available: boolean;
+  owners: number;
+  updatedAt: string;
+}
+
+/// Ce qu'un bundle donne : un article `asset` ou un scenario. `available`
+/// dit s'il se vend aussi seul, ce que le bundle ne demande pas.
+export interface AdminBundleEntry {
+  kind: 'asset' | 'scenario';
+  id: string;
+  title: string;
+  available: boolean;
+}
+
+export interface AdminBundle {
+  itemId: string;
+  title: string;
+  description: string;
+  priceCents: number;
+  available: boolean;
+  imageHash: string | null;
+  owners: number;
+  contents: AdminBundleEntry[];
+  updatedAt: string;
 }
 
 export interface UserDetail {

@@ -20,6 +20,7 @@ export interface AdminScenarioNpc {
   id: string;
   name: string;
   description: string;
+  token: string | null;
 }
 
 export interface AdminScenarioClue {
@@ -145,6 +146,7 @@ export class AdminScenarioService {
         id: npc.id,
         name: npc.name,
         description: npc.description,
+        token: npc.token,
       })),
       clues: scenario.clues.map((clue) => ({
         id: clue.id,
@@ -170,6 +172,7 @@ export class AdminScenarioService {
               sortOrder: index,
               name: npc.name,
               description: npc.description,
+              token: npc.token ?? null,
             })),
           },
           clues: {
@@ -255,7 +258,12 @@ export class AdminScenarioService {
       if (npcs !== undefined) {
         await tx.scenarioNpc.deleteMany({ where: { id: { in: removedNpcs } } });
         for (const [index, npc] of npcs.entries()) {
-          const data = { sortOrder: index, name: npc.name, description: npc.description };
+          const data = {
+            sortOrder: index,
+            name: npc.name,
+            description: npc.description,
+            ...(npc.token !== undefined ? { token: npc.token } : {}),
+          };
           if (npc.id === undefined) {
             await tx.scenarioNpc.create({ data: { ...data, scenarioId: id } });
           } else {

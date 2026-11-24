@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { tokenRefSchema } from '../../lib/token-ref.js';
 
 const idSchema = z.string().uuid();
 const isoDate = z.string().datetime({ offset: true });
@@ -85,6 +86,10 @@ export const patchNpcSchema = npcCoreSchema.partial().refine(
   (value) => Object.keys(value).length > 0,
   { message: 'At least one field must be provided' },
 );
+
+/// `null` takes the token away: the character is no longer offered in the
+/// drawer, though copies already on the board stay where they are.
+export const tokenBodySchema = z.object({ token: tokenRefSchema.nullable() });
 
 export const sessionNpcParamsSchema = z.object({
   id: idSchema,

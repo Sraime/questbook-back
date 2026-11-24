@@ -245,6 +245,7 @@ model GameSession {
   scenario           Scenario?            @relation(fields: [scenarioId], references: [id], onDelete: SetNull)
   attendances        SessionAttendance[]
   npcs               SessionNpc[]
+  npcTokens          SessionNpcToken[]
   clues              SessionClue[]
   scenarioClueAccess ScenarioClueAccess[]
   board              SessionBoard?
@@ -272,6 +273,24 @@ model SessionNpc {
 
   @@index([sessionId, createdAt])
   @@map("session_npcs")
+}
+
+/// The token a game master gave a non-player character for one session.
+///
+/// Apart from `session_npcs` because a scenario's cast is read-only to him,
+/// yet is exactly who he wants on the board. `npcId` is therefore either a
+/// `session_npcs` row or a `scenario_npcs` one, and carries no foreign key.
+model SessionNpcToken {
+  sessionId String @map("session_id")
+  npcId     String @map("npc_id")
+  /// `null` is a choice, not an absence: « Aucun » on a scenario character
+  /// whose author gave it a token. Without the row, that token applies.
+  token     String?
+
+  session GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@id([sessionId, npcId])
+  @@map("session_npc_tokens")
 }
 
 /// The inverse of a NPC: prepared the same way, but meant to cross the screen.
@@ -341,6 +360,7 @@ model Scenario {
   ownerships ScenarioOwnership[]
   sessions   GameSession[]
   shopItems  ShopItem[]
+  bundleEntries ShopBundleEntry[]
 
   @@map("scenarios")
 }
@@ -358,6 +378,9 @@ model ScenarioNpc {
   sortOrder   Int    @map("sort_order")
   name        String
   description String @default("") @db.Text
+  /// The token the author meant for it, `asset:<key>` or `socle:<color>`. A
+  /// session starts from it, and the game master may still pick another.
+  token       String?
 
   scenario Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
 
@@ -416,8 +439,8 @@ model ScenarioClueAccess {
 model ShopItem {
   id          String   @id @default(uuid())
   title       String
-  /// `asset`, `scenario` or `pack` — stored as text like other enumerations
-  /// here. `pack` has no content model yet and cannot be purchased.
+  /// `asset`, `scenario` or `bundle` — stored as text like other enumerations
+  /// here. A `bundle` sells what [ShopBundleEntry] lists under it.
   type        String
   description String   @db.Text
   /// In cents, so no rounding ever happens in the app. `0` is the free
@@ -429,14 +452,84 @@ model ShopItem {
   assetKey    String?  @map("asset_key")
   scenarioId  String?  @map("scenario_id")
   sortOrder   Int      @default(0) @map("sort_order")
+  /// Whether the shop still sells it. An article is withdrawn rather than
+  /// deleted: deleting would cascade into who owns it, and a token already
+  /// on a board must keep its drawing.
+  available   Boolean  @default(true)
+  /// A picture sent from the backoffice, which only bundles have: unlike an
+  /// asset, a bundle has no drawing of its own to borrow. Takes precedence
+  /// over `imageKey` when present.
+  image       Bytes?
+  imageType   String?  @map("image_type")
+  /// SHA-256 of `image`, which the app names its cached copy after.
+  imageHash   String?  @map("image_hash")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  scenario   Scenario?           @relation(fields: [scenarioId], references: [id], onDelete: SetNull)
-  ownerships ShopItemOwnership[]
+  scenario       Scenario?           @relation(fields: [scenarioId], references: [id], onDelete: SetNull)
+  ownerships     ShopItemOwnership[]
+  bundleEntries  ShopBundleEntry[]   @relation("BundleContent")
+  includedIn     ShopBundleEntry[]   @relation("BundledAsset")
 
   @@index([sortOrder])
   @@map("shop_items")
+}
+
+/// One thing a bundle hands over: an `asset` article or a scenario, exactly
+/// one of the two. Both must already exist, on sale or not — a bundle
+/// gathers what the catalogue has, it does not create anything.
+///
+/// A scenario is named directly rather than through an article: an adventure
+/// may exist without ever being sold on its own.
+model ShopBundleEntry {
+  id          String  @id @default(uuid())
+  bundleId    String  @map("bundle_id")
+  sortOrder   Int     @map("sort_order")
+  assetItemId String? @map("asset_item_id")
+  scenarioId  String? @map("scenario_id")
+
+  bundle    ShopItem  @relation("BundleContent", fields: [bundleId], references: [id], onDelete: Cascade)
+  assetItem ShopItem? @relation("BundledAsset", fields: [assetItemId], references: [id], onDelete: Cascade)
+  scenario  Scenario? @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+
+  @@unique([bundleId, assetItemId], map: "shop_bundle_entries_bundle_asset_key")
+  @@unique([bundleId, scenarioId], map: "shop_bundle_entries_bundle_scenario_key")
+  @@index([bundleId, sortOrder])
+  @@map("shop_bundle_entries")
+}
+
+/// A token whose drawing the server hosts, written from the backoffice.
+///
+/// The tokens bundled with the app (`grand_ancien`) have no row here: their
+/// drawing ships in the binary, and an `asset` shop item names them by key
+/// all the same. A row here is what lets an asset reach players without a
+/// release.
+///
+/// The image lives in the database rather than on disk: `pg_dump` already
+/// backs it up, and the API containers stay stateless. Tokens are small
+/// pictures, capped on upload.
+model Asset {
+  /// What a placed token remembers, so it never changes once written.
+  key       String   @id
+  name      String
+  /// `character`, `environment` or `effect`, the wire values of the app's
+  /// `BoardTokenKind` — zones are drawn, never illustrated — or `map`, a
+  /// board background rather than a token.
+  kind      String
+  image     Bytes
+  imageType String   @map("image_type")
+  /// Read from the image itself. A board takes the proportions of its map,
+  /// or tokens would slide over a stretched picture. Null only on tokens
+  /// written before maps existed, which have no use for it.
+  width     Int?
+  height    Int?
+  /// SHA-256 of `image`. The app names its cached copy after it, so a new
+  /// picture is fetched once and an unchanged one never again.
+  imageHash String   @map("image_hash")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("assets")
 }
 
 /// Who bought what. Mirrors [ScenarioOwnership], which stays the authority on
@@ -518,6 +611,10 @@ model SessionAttendance {
   userId      String   @map("user_id")
   status      String
   characterId String?  @map("character_id")
+  /// The token the game master gave this investigator for this session:
+  /// `asset:<key>` or `socle:<color>`. Cleared when the player switches
+  /// investigator, since it was chosen for the previous one.
+  token       String?
   respondedAt DateTime @default(now()) @map("responded_at")
 
   session   GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)

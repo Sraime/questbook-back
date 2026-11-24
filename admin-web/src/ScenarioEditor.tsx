@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from './api';
+import { Autocomplete, type Choice } from './Autocomplete';
 import { formatDate } from './format';
 import { ScenarioOwners } from './ScenarioOwners';
-import type { ScenarioDetail } from './types';
+import type { AdminAsset, ScenarioDetail } from './types';
 
 interface ScenarioEditorProps {
   /// `null` pour une aventure qui n'existe pas encore.
@@ -26,7 +27,17 @@ interface Row {
 interface NpcRow extends Row {
   name: string;
   description: string;
+  token: string | null;
 }
+
+/// Les quatre pions que l'app donne a tout le monde, et qui n'ont pas de cle.
+/// Les memes noms que dans le choix du pion de l'app.
+const SOCLES: { ref: string; label: string }[] = [
+  { ref: 'socle:red', label: 'Joueur rouge' },
+  { ref: 'socle:green', label: 'Joueur vert' },
+  { ref: 'socle:blue', label: 'Joueur bleu' },
+  { ref: 'socle:yellow', label: 'Joueur jaune' },
+];
 
 interface ClueRow extends Row {
   title: string;
@@ -111,6 +122,33 @@ export function ScenarioEditor({
   );
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [tokens, setTokens] = useState<AdminAsset[]>([]);
+
+  // Les pions de personnage seulement : une carte ou un effet ne representent
+  // personne. Ceux qu'embarque l'app n'ont pas de nature ici, et en sont.
+  useEffect(() => {
+    api<AdminAsset[]>('/admin/assets')
+      .then((assets) =>
+        setTokens(assets.filter((asset) => asset.kind === 'character' || asset.kind === null)),
+      )
+      .catch(onError);
+  }, [onError]);
+
+  const tokenChoices: Choice[] = [
+    ...SOCLES.map((socle) => ({ id: socle.ref, label: socle.label, hint: 'Pion de joueur' })),
+    ...tokens.map((asset) => ({
+      id: `asset:${asset.key}`,
+      label: asset.title,
+      hint: asset.available ? 'Asset' : 'Asset retiré de la vente',
+    })),
+  ];
+
+  // Un pion d'un asset que la liste ne connait pas encore — elle se charge, ou
+  // l'asset a change de nature — se montre par sa cle plutot que par rien.
+  const tokenLabel = (token: string | null) =>
+    token === null
+      ? 'Aucun'
+      : (tokenChoices.find((choice) => choice.id === token)?.label ?? token);
 
   const change = (patch: Partial<Draft>) => {
     setDraft((current) => ({ ...current, ...patch }));
@@ -137,6 +175,7 @@ export function ScenarioEditor({
           id: npc.id,
           name: npc.name.trim(),
           description: npc.description,
+          token: npc.token,
         })),
         clues: draft.clues.map((clue) => ({
           id: clue.id,
@@ -366,12 +405,41 @@ export function ScenarioEditor({
               maxLength={10_000}
               placeholder="Ce qu’il sait, ce qu’il cache."
             />
+            <div className="note">
+              Pion — celui qu’il a d’office sur le plateau, que le meneur peut changer
+              <ul className="picked">
+                <li>
+                  <span>
+                    <strong>{tokenLabel(npc.token)}</strong>
+                  </span>
+                  {npc.token !== null && (
+                    <button
+                      className="link destructive"
+                      onClick={() =>
+                        change({ npcs: patched(draft.npcs, index, { token: null }) })
+                      }
+                    >
+                      Retirer
+                    </button>
+                  )}
+                </li>
+              </ul>
+              <Autocomplete
+                choices={tokenChoices.filter((choice) => choice.id !== npc.token)}
+                onPick={(choice) =>
+                  change({ npcs: patched(draft.npcs, index, { token: choice.id }) })
+                }
+                placeholder={npc.token === null ? 'Chercher un pion…' : 'Changer de pion…'}
+              />
+            </div>
           </div>
         ))}
 
         <button
           onClick={() =>
-            change({ npcs: [...draft.npcs, { key: newKey(), name: '', description: '' }] })
+            change({
+              npcs: [...draft.npcs, { key: newKey(), name: '', description: '', token: null }],
+            })
           }
           disabled={draft.npcs.length >= 60}
         >

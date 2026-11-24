@@ -10,6 +10,7 @@ import {
   attendanceSchema,
   createClueSchema,
   createNpcSchema,
+  tokenBodySchema,
   patchClueSchema,
   patchNpcSchema,
   patchSessionSchema,
@@ -92,6 +93,18 @@ const sessionRoutes: FastifyPluginAsync = async (fastify) => {
       ),
   );
 
+  app.put(
+    '/:id/attendances/:userId/token',
+    { schema: { params: sessionAttendeeParamsSchema, body: tokenBodySchema } },
+    async (request) =>
+      service.setAttendanceToken(
+        request.user.sub,
+        request.params.id,
+        request.params.userId,
+        request.body.token,
+      ),
+  );
+
   // --- Non-player characters ---
   //
   // Game-master-only, reads included: what the game master has prepared is
@@ -131,6 +144,20 @@ const sessionRoutes: FastifyPluginAsync = async (fastify) => {
       await npcs.remove(request.user.sub, request.params.id, request.params.npcId);
       return reply.code(204).send();
     },
+  );
+
+  // Its own route rather than a field of the patch above: a scenario's
+  // character refuses every edit, yet takes a token like any other.
+  app.put(
+    '/:id/npcs/:npcId/token',
+    { schema: { params: sessionNpcParamsSchema, body: tokenBodySchema } },
+    async (request) =>
+      npcs.setToken(
+        request.user.sub,
+        request.params.id,
+        request.params.npcId,
+        request.body.token,
+      ),
   );
 
   // --- Clues ---

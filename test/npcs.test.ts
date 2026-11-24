@@ -171,6 +171,128 @@ describe('non-player characters', () => {
     expect(created.statusCode).toBe(400);
   });
 
+  describe('token', () => {
+    const setToken = (as: SignedInUser, sessionId: string, npcId: string, token: unknown) =>
+      context.app.inject({
+        method: 'PUT',
+        url: `/api/v1/sessions/${sessionId}/npcs/${npcId}/token`,
+        headers: as.authHeader,
+        payload: { token },
+      });
+
+    it('gives one, lists it with it, then takes it away', async () => {
+      const { gm, sessionId } = await tableWithSession();
+      const npc = (await addNpc(gm, sessionId, { name: 'Le rôdeur' })).json();
+      expect(npc.token).toBeNull();
+
+      const given = await setToken(gm, sessionId, npc.id, 'asset:gold_cthulhu');
+      expect(given.statusCode).toBe(200);
+      expect(given.json()).toMatchObject({ name: 'Le rôdeur', token: 'asset:gold_cthulhu' });
+      expect((await listNpcs(gm, sessionId)).json().npcs[0].token).toBe('asset:gold_cthulhu');
+
+      // Renaming must not lose it.
+      const renamed = await context.app.inject({
+        method: 'PATCH',
+        url: `/api/v1/sessions/${sessionId}/npcs/${npc.id}`,
+        headers: gm.authHeader,
+        payload: { name: 'Le rôdeur du seuil' },
+      });
+      expect(renamed.json().token).toBe('asset:gold_cthulhu');
+
+      await setToken(gm, sessionId, npc.id, null);
+      expect((await listNpcs(gm, sessionId)).json().npcs[0].token).toBeNull();
+    });
+
+    it('goes to a scenario character too, which refuses every other edit', async () => {
+      const { gm, sessionId } = await tableWithSession();
+      const scenario = await prisma.scenario.create({
+        data: {
+          title: 'Le Phare de Kerloc’h',
+          description: 'Un gardien disparaît.',
+          context: 'Kerloc’h, 1924.',
+          minRecommendedPlayers: 2,
+          maxRecommendedPlayers: 5,
+          averageDurationMinutes: 180,
+          rundownMarkdown: '## Mise en place',
+          npcs: { create: [{ name: 'Le gardien', description: '', sortOrder: 0 }] },
+        },
+        include: { npcs: true },
+      });
+      await prisma.gameSession.update({
+        where: { id: sessionId },
+        data: { scenarioId: scenario.id },
+      });
+      const keeper = scenario.npcs[0]!;
+
+      const given = await setToken(gm, sessionId, keeper.id, 'socle:yellow');
+      expect(given.statusCode).toBe(200);
+      expect((await listNpcs(gm, sessionId)).json().npcs[0]).toMatchObject({
+        origin: 'scenario',
+        token: 'socle:yellow',
+      });
+    });
+
+    it('starts from the one the author gave, which « Aucun » can still override', async () => {
+      const { gm, sessionId } = await tableWithSession();
+      const scenario = await prisma.scenario.create({
+        data: {
+          title: 'Le Phare de Kerloc’h',
+          description: 'Un gardien disparaît.',
+          context: 'Kerloc’h, 1924.',
+          minRecommendedPlayers: 2,
+          maxRecommendedPlayers: 5,
+          averageDurationMinutes: 180,
+          rundownMarkdown: '## Mise en place',
+          npcs: {
+            create: [{ name: 'Le gardien', description: '', sortOrder: 0, token: 'socle:blue' }],
+          },
+        },
+        include: { npcs: true },
+      });
+      await prisma.gameSession.update({
+        where: { id: sessionId },
+        data: { scenarioId: scenario.id },
+      });
+      const keeper = scenario.npcs[0]!;
+
+      expect((await listNpcs(gm, sessionId)).json().npcs[0].token).toBe('socle:blue');
+
+      await setToken(gm, sessionId, keeper.id, 'socle:red');
+      expect((await listNpcs(gm, sessionId)).json().npcs[0].token).toBe('socle:red');
+
+      // Taking it away sticks, rather than bringing the author's back.
+      await setToken(gm, sessionId, keeper.id, null);
+      expect((await listNpcs(gm, sessionId)).json().npcs[0].token).toBeNull();
+    });
+
+    it('is the game master’s to give, and only a known shape', async () => {
+      const { gm, player, sessionId } = await tableWithSession();
+      const npc = (await addNpc(gm, sessionId, { name: 'Le rôdeur' })).json();
+
+      expect((await setToken(player, sessionId, npc.id, 'socle:red')).statusCode).toBe(403);
+      expect((await setToken(gm, sessionId, npc.id, 'socle:violet')).statusCode).toBe(400);
+      expect((await setToken(gm, sessionId, npc.id, '../etc')).statusCode).toBe(400);
+      expect(
+        (await setToken(gm, sessionId, '00000000-0000-4000-8000-000000000000', 'socle:red'))
+          .statusCode,
+      ).toBe(404);
+    });
+
+    it('goes with the character it was given to', async () => {
+      const { gm, sessionId } = await tableWithSession();
+      const npc = (await addNpc(gm, sessionId, { name: 'Le rôdeur' })).json();
+      await setToken(gm, sessionId, npc.id, 'socle:red');
+
+      await context.app.inject({
+        method: 'DELETE',
+        url: `/api/v1/sessions/${sessionId}/npcs/${npc.id}`,
+        headers: gm.authHeader,
+      });
+
+      expect(await prisma.sessionNpcToken.count()).toBe(0);
+    });
+  });
+
   it('disappears with the session that held it', async () => {
     const { gm, tableId, sessionId } = await tableWithSession();
     await addNpc(gm, sessionId, { name: 'Le rôdeur du seuil' });
