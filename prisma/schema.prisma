@@ -100,6 +100,9 @@ model Character {
   occupation  String?
   description String?
   level       Int       @default(1)
+  /// The token that stands for this investigator on a board: `asset:<key>`
+  /// for one from the shop, `socle:<color>` for one of the shared set.
+  token       String?
   createdAt   DateTime  @map("created_at")
   updatedAt   DateTime  @map("updated_at")
   deletedAt   DateTime? @map("deleted_at")
@@ -245,6 +248,7 @@ model GameSession {
   scenario           Scenario?            @relation(fields: [scenarioId], references: [id], onDelete: SetNull)
   attendances        SessionAttendance[]
   npcs               SessionNpc[]
+  npcTokens          SessionNpcToken[]
   clues              SessionClue[]
   scenarioClueAccess ScenarioClueAccess[]
   board              SessionBoard?
@@ -272,6 +276,22 @@ model SessionNpc {
 
   @@index([sessionId, createdAt])
   @@map("session_npcs")
+}
+
+/// The token a game master gave a non-player character for one session.
+///
+/// Apart from `session_npcs` because a scenario's cast is read-only to him,
+/// yet is exactly who he wants on the board. `npcId` is therefore either a
+/// `session_npcs` row or a `scenario_npcs` one, and carries no foreign key.
+model SessionNpcToken {
+  sessionId String @map("session_id")
+  npcId     String @map("npc_id")
+  token     String
+
+  session GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@id([sessionId, npcId])
+  @@map("session_npc_tokens")
 }
 
 /// The inverse of a NPC: prepared the same way, but meant to cross the screen.

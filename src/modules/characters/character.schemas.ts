@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { tokenRefSchema } from '../../lib/token-ref.js';
 
 /// Mirrors `StatKind` in the Flutter app (lib/domain/models/character_stat.dart).
 export const statKindSchema = z.enum(['characteristic', 'skill', 'attribute']);
@@ -41,6 +42,9 @@ const characterCoreSchema = z.object({
   occupation: z.string().max(200).nullish(),
   description: z.string().max(5000).nullish(),
   level: z.number().int().min(1).max(999).default(1),
+  /// Absent means « leave it as it is »: an app older than tokens pushes the
+  /// whole sheet without it, and must not wipe one chosen on another device.
+  token: tokenRefSchema.nullish(),
 });
 
 export const createCharacterSchema = characterCoreSchema.extend({

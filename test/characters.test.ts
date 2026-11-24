@@ -127,6 +127,56 @@ describe('Characters and inventory', () => {
     expect(response.json().level).toBe(3);
   });
 
+  describe('token', () => {
+    const push = (id: string, overrides: Record<string, unknown>) =>
+      context.app.inject({
+        method: 'PUT',
+        url: `/api/v1/characters/${id}`,
+        headers: user.authHeader,
+        payload: characterPayload({
+          updatedAt: new Date(Date.now() + 60_000).toISOString(),
+          ...overrides,
+        }),
+      });
+
+    it('travels with the sheet', async () => {
+      const character = await createCharacter(user, { token: 'socle:red' });
+      expect(character.token).toBe('socle:red');
+
+      const patched = await context.app.inject({
+        method: 'PATCH',
+        url: `/api/v1/characters/${character.id}`,
+        headers: user.authHeader,
+        payload: { token: 'asset:gold_cthulhu' },
+      });
+      expect(patched.json().token).toBe('asset:gold_cthulhu');
+    });
+
+    it('survives a push from an app that does not know about it', async () => {
+      const character = await createCharacter(user, { token: 'socle:red' });
+
+      const pushed = await push(character.id, { name: 'Ernest le Sage' });
+      expect(pushed.statusCode).toBe(200);
+      expect(pushed.json().token).toBe('socle:red');
+
+      const cleared = await push(character.id, {
+        token: null,
+        updatedAt: new Date(Date.now() + 120_000).toISOString(),
+      });
+      expect(cleared.json().token).toBeNull();
+    });
+
+    it('refuses what is neither an asset nor a token of the shared set', async () => {
+      const response = await context.app.inject({
+        method: 'POST',
+        url: '/api/v1/characters',
+        headers: user.authHeader,
+        payload: characterPayload({ token: 'socle:violet' }),
+      });
+      expect(response.statusCode).toBe(400);
+    });
+  });
+
   describe('inventory', () => {
     it('adds, updates and removes an item', async () => {
       const character = await createCharacter();

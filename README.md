@@ -940,6 +940,7 @@ la supprimer.
 | `POST`   | `/sessions/:id/npcs`                           | En ajouter un (MJ, 201)                           |
 | `PATCH`  | `/sessions/:id/npcs/:npcId`                    | Nom, description (MJ)                             |
 | `DELETE` | `/sessions/:id/npcs/:npcId`                    | Le retirer (MJ, 204)                              |
+| `PUT`    | `/sessions/:id/npcs/:npcId/token`              | Son pion pour la séance, `null` pour l'ôter (MJ)  |
 | `GET`    | `/sessions/:id/clues`                          | Les indices et leurs destinataires (MJ seul)      |
 | `POST`   | `/sessions/:id/clues`                          | En composer un, en markdown (MJ, 201)             |
 | `PATCH`  | `/sessions/:id/clues/:clueId`                  | Titre, contenu (MJ)                               |
@@ -1024,6 +1025,33 @@ d'un indice livré avec l'aventure. Il lui fallait juste sa propre table :
 `session_clue_access` n'en a pas besoin. Le même carnet de la crique se
 transmet soir après soir, à d'autres tables, à d'autres gens, et rien de tout
 cela ne doit se suivre d'une séance à l'autre.
+
+#### Le pion d'un personnage
+
+Un investigateur et un PNJ peuvent avoir **un pion** : celui qui les représente
+sur le plateau, et que le tiroir du MJ propose sous leur nom. La référence a
+deux formes, validées par `src/lib/token-ref.ts` : `asset:<clé>` pour un pion de
+la boutique, `socle:<couleur>` pour l'un des quatre que l'app donne à tous, qui
+n'ont pas de clé. La propriété n'est pas vérifiée : l'app ne propose que ce que
+le compte possède, et une référence vers autre chose se dessinerait seulement
+en pion simple.
+
+- **Celui de l'investigateur** est choisi par son joueur et vit dans
+  `characters.token`. Il voyage avec la fiche — création, `PATCH`, push de
+  synchronisation — et dans le résumé que porte chaque participation au détail
+  d'une session : c'est là que le MJ le lit. **Un push qui ne porte pas le champ
+  ne l'efface pas** : une app antérieure renvoie toute la fiche sans lui, et ne
+  doit pas défaire le choix fait sur un autre appareil. Seul `token: null`
+  l'efface.
+- **Celui du PNJ** est choisi par le MJ et vit dans `session_npc_tokens`, une
+  table à part parce que les PNJ du scénario refusent toute modification mais
+  doivent pouvoir recevoir un pion. Sa route est donc distincte du `PATCH`, et
+  ouverte aux deux origines. `npc_id` désigne indifféremment une ligne de
+  `session_npcs` ou de `scenario_npcs`, d'où l'absence de clé étrangère : la
+  ligne part avec la séance, ou avec le PNJ quand le MJ le retire.
+
+Le pion posé sur le plateau garde, lui, le lien vers son personnage dans le JSON
+de `session_boards.tokens`, que le serveur ne lit pas.
 
 Retirer ou changer le scénario d'une séance reprend ce qu'il avait distribué
 (`SessionService.patch` efface les lignes d'accès). Le MJ n'a jamais pu modifier

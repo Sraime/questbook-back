@@ -31,6 +31,9 @@ export interface AttendanceCharacterDto {
   id: string;
   name: string;
   occupation: string | null;
+  /// The token its player chose for it, which the game master's drawer offers
+  /// under the investigator's name.
+  token: string | null;
 }
 
 export interface AttendanceDto {
@@ -572,6 +575,7 @@ function toSessionDto(row: SessionWithRelations, viewerId: string): GameSessionD
             id: attendance.character.id,
             name: attendance.character.name,
             occupation: attendance.character.occupation,
+            token: attendance.character.token,
           }
         : null,
   }));

@@ -40,6 +40,7 @@ export interface CharacterDto {
   occupation: string | null;
   description: string | null;
   level: number;
+  token: string | null;
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
@@ -76,6 +77,7 @@ export function toCharacterDto(row: CharacterWithChildren): CharacterDto {
     occupation: row.occupation,
     description: row.description,
     level: row.level,
+    token: row.token,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     deletedAt: row.deletedAt?.toISOString() ?? null,
@@ -165,6 +167,7 @@ export class CharacterService {
         occupation: input.occupation ?? null,
         description: input.description ?? null,
         level: input.level,
+        token: input.token ?? null,
         createdAt,
         updatedAt: now,
         stats: { create: input.stats.map((stat) => this.statCreate(stat)) },
@@ -213,6 +216,7 @@ export class CharacterService {
       occupation: input.occupation ?? null,
       description: input.description ?? null,
       level: input.level,
+      ...(input.token === undefined ? {} : { token: input.token }),
       createdAt: new Date(input.createdAt),
       updatedAt: incomingUpdatedAt,
       deletedAt: input.deletedAt ? new Date(input.deletedAt) : null,
