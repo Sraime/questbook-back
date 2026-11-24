@@ -14,16 +14,19 @@ export interface SessionNpcDto {
   name: string;
   description: string;
   origin: NpcOrigin;
+  /// The token the game master gave it for this session, if any.
+  token: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
-const toDto = (row: SessionNpc): SessionNpcDto => ({
+const toDto = (row: SessionNpc, token: string | null = null): SessionNpcDto => ({
   id: row.id,
   sessionId: row.sessionId,
   name: row.name,
   description: row.description,
   origin: 'gameMaster',
+  token,
   createdAt: row.createdAt.toISOString(),
   updatedAt: row.updatedAt.toISOString(),
 });
@@ -34,12 +37,14 @@ const fromScenario = (
   row: ScenarioNpc,
   sessionId: string,
   scenarioUpdatedAt: Date,
+  token: string | null,
 ): SessionNpcDto => ({
   id: row.id,
   sessionId,
   name: row.name,
   description: row.description,
   origin: 'scenario',
+  token,
   createdAt: scenarioUpdatedAt.toISOString(),
   updatedAt: scenarioUpdatedAt.toISOString(),
 });
@@ -59,18 +64,52 @@ export class NpcService {
   async list(userId: string, sessionId: string): Promise<SessionNpcDto[]> {
     const session = await this.requireGameMasterOfSession(userId, sessionId);
 
-    const [scenario, rows] = await Promise.all([
+    const [scenario, rows, tokenRows] = await Promise.all([
       this.scenarioNpcs(session.scenarioId),
       this.prisma.sessionNpc.findMany({
         where: { sessionId },
         orderBy: { createdAt: 'asc' },
       }),
+      this.prisma.sessionNpcToken.findMany({ where: { sessionId } }),
     ]);
+    const tokens = new Map(tokenRows.map((row) => [row.npcId, row.token]));
+    const tokenOf = (id: string) => tokens.get(id) ?? null;
 
     return [
-      ...scenario.npcs.map((npc) => fromScenario(npc, sessionId, scenario.updatedAt)),
-      ...rows.map(toDto),
+      ...scenario.npcs.map((npc) =>
+        fromScenario(npc, sessionId, scenario.updatedAt, tokenOf(npc.id)),
+      ),
+      ...rows.map((row) => toDto(row, tokenOf(row.id))),
     ];
+  }
+
+  /// Gives a character its token for this session, or takes it away. Open to
+  /// the scenario's cast as much as to the game master's own: who stands on
+  /// the board is his call, whoever wrote them.
+  async setToken(
+    userId: string,
+    sessionId: string,
+    npcId: string,
+    token: string | null,
+  ): Promise<SessionNpcDto> {
+    await this.requireGameMasterOfSession(userId, sessionId);
+
+    const npc = (await this.list(userId, sessionId)).find((each) => each.id === npcId);
+    if (!npc) {
+      throw notFound('Non-player character not found');
+    }
+
+    if (token === null) {
+      await this.prisma.sessionNpcToken.deleteMany({ where: { sessionId, npcId } });
+    } else {
+      await this.prisma.sessionNpcToken.upsert({
+        where: { sessionId_npcId: { sessionId, npcId } },
+        create: { sessionId, npcId, token },
+        update: { token },
+      });
+    }
+
+    return { ...npc, token };
   }
 
   async create(
@@ -107,15 +146,21 @@ export class NpcService {
         ...(input.description === undefined ? {} : { description: input.description }),
       },
     });
+    const token = await this.prisma.sessionNpcToken.findUnique({
+      where: { sessionId_npcId: { sessionId, npcId } },
+    });
 
-    return toDto(row);
+    return toDto(row, token?.token ?? null);
   }
 
   async remove(userId: string, sessionId: string, npcId: string): Promise<void> {
     await this.requireGameMasterOfSession(userId, sessionId);
     await this.requireInSession(sessionId, npcId);
 
-    await this.prisma.sessionNpc.delete({ where: { id: npcId } });
+    await this.prisma.$transaction([
+      this.prisma.sessionNpcToken.deleteMany({ where: { sessionId, npcId } }),
+      this.prisma.sessionNpc.delete({ where: { id: npcId } }),
+    ]);
   }
 
   /// 404 rather than 403 for a session the caller cannot see, like everywhere
