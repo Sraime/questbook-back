@@ -89,7 +89,7 @@ export const patchNpcSchema = npcCoreSchema.partial().refine(
 
 /// `null` takes the token away: the character is no longer offered in the
 /// drawer, though copies already on the board stay where they are.
-export const npcTokenSchema = z.object({ token: tokenRefSchema.nullable() });
+export const tokenBodySchema = z.object({ token: tokenRefSchema.nullable() });
 
 export const sessionNpcParamsSchema = z.object({
   id: idSchema,

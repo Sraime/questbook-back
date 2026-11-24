@@ -526,6 +526,89 @@ describe('Participation', () => {
     expect(asGm.json().inventory).toHaveLength(1);
   });
 
+  describe("an investigator's token", () => {
+    const giveToken = (
+      as: SignedInUser,
+      sessionId: string,
+      memberId: string,
+      token: unknown,
+    ) =>
+      context.app.inject({
+        method: 'PUT',
+        url: `/api/v1/sessions/${sessionId}/attendances/${memberId}/token`,
+        headers: as.authHeader,
+        payload: { token },
+      });
+
+    async function seated() {
+      const { gm, player, tableId } = await tableWithPlayer();
+      const session = await scheduleSession(gm, tableId);
+      const character = await createCharacter(player);
+      await answer(player, session.id, { status: 'yes', characterId: character.id });
+      return { gm, player, tableId, session, character };
+    }
+
+    it('is given by the game master, for this session', async () => {
+      const { gm, player, session } = await seated();
+
+      const given = await giveToken(gm, session.id, player.userId, 'asset:gold_cthulhu');
+      expect(given.statusCode).toBe(200);
+      expect(given.json().attendances[0].token).toBe('asset:gold_cthulhu');
+
+      const asPlayer = await context.app.inject({
+        method: 'GET',
+        url: `/api/v1/sessions/${session.id}`,
+        headers: player.authHeader,
+      });
+      expect(asPlayer.json().attendances[0].token).toBe('asset:gold_cthulhu');
+
+      const taken = await giveToken(gm, session.id, player.userId, null);
+      expect(taken.json().attendances[0].token).toBeNull();
+    });
+
+    it('stays with the session it was given for', async () => {
+      const { gm, player, tableId, session, character } = await seated();
+      await giveToken(gm, session.id, player.userId, 'socle:red');
+
+      const next = await scheduleSession(gm, tableId, { title: 'La suite' });
+      const answered = await answer(player, next.id, {
+        status: 'yes',
+        characterId: character.id,
+      });
+      expect(answered.json().attendances[0].token).toBeNull();
+    });
+
+    it('is not the player’s to choose, and only a known shape', async () => {
+      const { gm, player, session } = await seated();
+
+      expect((await giveToken(player, session.id, player.userId, 'socle:red')).statusCode)
+        .toBe(403);
+      expect((await giveToken(gm, session.id, player.userId, 'socle:violet')).statusCode)
+        .toBe(400);
+      expect((await giveToken(gm, session.id, gm.userId, 'socle:red')).statusCode).toBe(404);
+    });
+
+    it('goes when the player switches investigator', async () => {
+      const { gm, player, session } = await seated();
+      await giveToken(gm, session.id, player.userId, 'socle:red');
+      const other = await createCharacter(player, { name: 'Harvey Walters' });
+
+      const switched = await setCharacter(player, session.id, other.id);
+
+      expect(switched.statusCode).toBe(200);
+      expect(switched.json().attendances[0].token).toBeNull();
+    });
+
+    it('survives an answer that keeps the same investigator', async () => {
+      const { gm, player, session } = await seated();
+      await giveToken(gm, session.id, player.userId, 'socle:red');
+
+      const again = await answer(player, session.id, { status: 'yes' });
+
+      expect(again.json().attendances[0].token).toBe('socle:red');
+    });
+  });
+
   it('keeps a registered character away from outsiders', async () => {
     const { gm, player, tableId } = await tableWithPlayer();
     const session = await scheduleSession(gm, tableId);

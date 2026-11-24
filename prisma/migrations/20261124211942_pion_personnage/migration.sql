@@ -1,5 +1,5 @@
 -- AlterTable
-ALTER TABLE "characters" ADD COLUMN     "token" TEXT;
+ALTER TABLE "session_attendances" ADD COLUMN     "token" TEXT;
 
 -- CreateTable
 CREATE TABLE "session_npc_tokens" (

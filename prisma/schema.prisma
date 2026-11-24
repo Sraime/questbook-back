@@ -100,9 +100,6 @@ model Character {
   occupation  String?
   description String?
   level       Int       @default(1)
-  /// The token that stands for this investigator on a board: `asset:<key>`
-  /// for one from the shop, `socle:<color>` for one of the shared set.
-  token       String?
   createdAt   DateTime  @map("created_at")
   updatedAt   DateTime  @map("updated_at")
   deletedAt   DateTime? @map("deleted_at")
@@ -576,6 +573,10 @@ model SessionAttendance {
   userId      String   @map("user_id")
   status      String
   characterId String?  @map("character_id")
+  /// The token the game master gave this investigator for this session:
+  /// `asset:<key>` or `socle:<color>`. Cleared when the player switches
+  /// investigator, since it was chosen for the previous one.
+  token       String?
   respondedAt DateTime @default(now()) @map("responded_at")
 
   session   GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)

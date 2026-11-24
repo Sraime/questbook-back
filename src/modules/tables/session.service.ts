@@ -31,9 +31,6 @@ export interface AttendanceCharacterDto {
   id: string;
   name: string;
   occupation: string | null;
-  /// The token its player chose for it, which the game master's drawer offers
-  /// under the investigator's name.
-  token: string | null;
 }
 
 export interface AttendanceDto {
@@ -44,6 +41,9 @@ export interface AttendanceDto {
   /// Who they are playing, when they have said. Answering and choosing a
   /// character are two separate moments.
   character: AttendanceCharacterDto | null;
+  /// The token the game master gave that investigator for this session, which
+  /// his drawer offers under the investigator's name.
+  token: string | null;
 }
 
 export interface GameSessionDto {
@@ -356,10 +356,9 @@ export class SessionService {
     // le MJ avec une chaise et pas de fiche, et le joueur avec une session à
     // laquelle il ne pouvait pas participer. L'investigateur déjà nommé compte :
     // changer d'avis sur sa venue ne le redemande pas.
-    const named =
-      character ??
-      existing.attendances.find((row) => row.userId === userId)?.characterId ??
-      null;
+    const previousCharacterId =
+      existing.attendances.find((row) => row.userId === userId)?.characterId ?? null;
+    const named = character ?? previousCharacterId;
 
     if (status === 'yes' && !named) {
       throw conflict('Dis avec quel investigateur tu viens.');
@@ -398,8 +397,11 @@ export class SessionService {
           status,
           respondedAt: new Date(),
           // Omitting the field leaves an earlier choice alone; only an explicit
-          // null detaches it.
+          // null detaches it. The token was chosen for the previous one.
           ...(characterId !== undefined ? { characterId } : {}),
+          ...(characterId !== undefined && characterId !== previousCharacterId
+            ? { token: null }
+            : {}),
         },
       });
 
@@ -478,7 +480,11 @@ export class SessionService {
     const row = await this.prisma.$transaction(async (tx) => {
       await tx.sessionAttendance.update({
         where: { id: attendance.id },
-        data: { characterId },
+        // The token was chosen for the previous investigator.
+        data: {
+          characterId,
+          ...(characterId !== attendance.characterId ? { token: null } : {}),
+        },
       });
 
       await this.notifications.record(tx, drafts);
@@ -490,6 +496,40 @@ export class SessionService {
     });
 
     this.notifications.deliver(drafts);
+
+    return toSessionDto(row, userId);
+  }
+
+  /// The token that stands for a player's investigator on this session's
+  /// board. The game master's call alone: the board is his, and so is what he
+  /// puts on it. `null` takes it away.
+  async setAttendanceToken(
+    userId: string,
+    sessionId: string,
+    memberId: string,
+    token: string | null,
+  ): Promise<GameSessionDto> {
+    const { session, role } = await this.requireVisible(userId, sessionId);
+
+    if (role !== 'gm') {
+      throw forbidden("Only the game master chooses who stands for whom on the board");
+    }
+
+    const attendance = session.attendances.find((row) => row.userId === memberId);
+    if (!attendance?.characterId) {
+      throw notFound('This player has not said who they are playing');
+    }
+
+    const row = await this.prisma.$transaction(async (tx) => {
+      await tx.sessionAttendance.update({
+        where: { id: attendance.id },
+        data: { token },
+      });
+      return tx.gameSession.findUniqueOrThrow({
+        where: { id: sessionId },
+        include: sessionInclude,
+      });
+    });
 
     return toSessionDto(row, userId);
   }
@@ -575,9 +615,9 @@ function toSessionDto(row: SessionWithRelations, viewerId: string): GameSessionD
             id: attendance.character.id,
             name: attendance.character.name,
             occupation: attendance.character.occupation,
-            token: attendance.character.token,
           }
         : null,
+    token: attendance.token,
   }));
 
   const mine = attendances.find((a) => a.userId === viewerId);
