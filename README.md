@@ -665,6 +665,30 @@ liste ne doit pas doubler parce qu'on a cliqué deux fois.
 Les actions journalisées sont `scenario.create`, `scenario.update`,
 `scenario.grant` et `scenario.revoke`.
 
+### Les bundles de la boutique
+
+L'onglet « Bundles » réunit, en un article, des assets et des scénarios qui
+existent déjà — en vente ou non : un pion fait pour une aventure n'a souvent
+aucune raison de se vendre seul, et le bundle est alors le seul moyen de
+l'obtenir.
+
+| Méthode | Route                     | Ce qu'elle fait                                    |
+| ------- | ------------------------- | -------------------------------------------------- |
+| `GET`   | `/admin/bundles`          | Les bundles, avec leur contenu                     |
+| `GET`   | `/admin/bundles/:id`      | Un bundle                                          |
+| `GET`   | `/admin/bundles/:id/image`| Son image, pour l'aperçu de l'écran                |
+| `POST`  | `/admin/bundles`          | Crée le bundle, retiré de la vente sauf avis contraire |
+| `PATCH` | `/admin/bundles/:id`      | Titre, description, prix, disponibilité, image, contenu |
+
+Le contenu se remplace d'un bloc. Le modifier ne reprend rien à ceux qui ont
+déjà le bundle, et ne leur donne pas non plus ce qui s'y ajoute. Les actions
+journalisées sont `bundle.create` et `bundle.update`.
+
+L'éditeur de scénario donne aussi à chaque PNJ un **pion par défaut**, parmi
+les quatre pions de joueur et les assets de nature personnage. La session le
+reprend tant que le MJ n'en a pas choisi un autre ; « Aucun » s'enregistre
+comme un choix, d'où la colonne `token` nullable de `session_npc_tokens`.
+
 ### Les assets de la boutique
 
 Ajouter un pion demandait une release de l'app : une image sous `assets/`, une
@@ -1249,7 +1273,8 @@ rangé dans la copie locale et celui que la liste vient de rendre : **deux dates
 | Méthode | Route                      | Description                                        |
 | ------- | -------------------------- | -------------------------------------------------- |
 | `GET`   | `/shop/items`              | Tout le catalogue, chaque article portant `owned`  |
-| `GET`   | `/shop/items/:id`          | Détail d'un article, `scenario_id` compris         |
+| `GET`   | `/shop/items/:id`          | Détail d'un article, `scenario_id` et `contents` compris |
+| `GET`   | `/shop/items/:id/image`    | L'image propre d'un article — celle d'un bundle    |
 | `POST`  | `/shop/items/:id/purchase` | Accorde l'article et le renvoie possédé            |
 
 Trois partis pris valent d'être connus.
@@ -1293,9 +1318,22 @@ les avoir achetés, ni de ce qu'ils soient encore en vente.
 Acheter un article de type `scenario` écrit une ligne dans
 `scenario_ownerships` avec `source: 'purchase'` — la lecture d'un scénario
 reste gardée par cette table, si bien que rien en aval n'a à connaître
-l'existence de la boutique. Le type `pack` n'a pas encore de contenu
-modélisé et son achat est refusé. Un article au prix non nul l'est aussi, tant
+l'existence de la boutique. Un article au prix non nul est refusé, tant
 qu'aucun paiement n'existe : sans ce garde-fou, il serait donné.
+
+**Un bundle donne tout ce qu'il contient.** Son contenu vit dans
+`shop_bundle_entries` : des articles `asset` et des scénarios qui existent
+déjà, en vente ou non. L'obtenir écrit la possession du bundle, de chacun de
+ses articles `asset` (`source: 'bundle'`), de chacun de ses scénarios dans
+`scenario_ownerships`, et des articles `scenario` qui vendent ces mêmes
+aventures — sans quoi la boutique continuerait de proposer ce qu'on a déjà.
+Seul le prix du bundle compte, pas celui de ce qu'il contient. Deux bundles
+qui se recoupent ne font aucune erreur : ce qui est déjà possédé est ignoré.
+
+Le détail d'un bundle liste son contenu dans `contents`, chaque élément
+portant son propre `owned`. Un bundle a son image, envoyée depuis le
+backoffice et servie par `/shop/items/:id/image` ; `imageHash` la signale dès
+le résumé, et l'app nomme sa copie d'après lui.
 
 **Deux scénarios sont en rayon**, semés par
 `20260921120000_shop_scenarios` : « Le Dernier Train de Nuit » et
@@ -1754,8 +1792,9 @@ vérification que chaque événement produit bien la notification et l'e-mail
 attendus via les doublures. Côté boutique : catalogue visible en entier,
 description réservée au détail, achat qui rend l'article possédé sans
 contaminer les autres comptes, second achat sans erreur ni ligne en double,
-achat d'un scénario qui le fait apparaître dans `/scenarios`, et refus d'un
-article payant comme d'un `pack`.
+achat d'un scénario qui le fait apparaître dans `/scenarios`, refus d'un
+article payant, et bundles qui donnent tout leur contenu, se recoupent sans
+erreur et disent élément par élément ce qui est déjà possédé.
 
 Les suites partagent une base et la vident entre chaque test : elles s'exécutent
 donc en série (`fileParallelism: false`).

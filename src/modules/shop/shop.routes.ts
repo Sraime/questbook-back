@@ -19,6 +19,19 @@ const shopRoutes: FastifyPluginAsync = async (fastify) => {
     async (request) => service.get(request.user.sub, request.params.id),
   );
 
+  app.get(
+    '/items/:id/image',
+    { schema: { params: shopItemIdParamsSchema } },
+    async (request, reply) => {
+      const image = await service.image(request.params.id);
+      return reply
+        .type(image.type)
+        .header('etag', `"${image.hash}"`)
+        .header('cache-control', 'private, max-age=31536000, immutable')
+        .send(image.bytes);
+    },
+  );
+
   app.post(
     '/items/:id/purchase',
     { schema: { params: shopItemIdParamsSchema } },

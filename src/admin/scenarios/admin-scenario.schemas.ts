@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { tokenRefSchema } from '../../lib/token-ref.js';
 
 export const scenarioIdParamsSchema = z.object({ id: z.string().uuid() });
 
@@ -24,6 +25,9 @@ const scenarioNpcInputSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().min(1).max(120),
   description: z.string().max(10_000).default(''),
+  /// Le pion que la seance lui donne d'office. Absent, celui deja enregistre
+  /// reste ; `null` le retire.
+  token: tokenRefSchema.nullable().optional(),
 });
 
 const scenarioClueInputSchema = z.object({
