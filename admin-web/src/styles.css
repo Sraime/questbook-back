@@ -569,6 +569,70 @@ code {
   color: var(--doux);
 }
 
+/* La liste flotte sous le champ plutot que de pousser le formulaire : elle
+   s'ouvre et se ferme a chaque lettre. */
+.autocomplete {
+  position: relative;
+  margin-top: 0.3rem;
+}
+.suggestions {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 0.25rem;
+  list-style: none;
+  background: var(--panneau-clair);
+  border: 1px solid var(--bord);
+  border-radius: var(--rayon);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.4);
+}
+.suggestions li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--texte);
+}
+.suggestions li.active {
+  background: var(--fond);
+  outline: 1px solid var(--accent);
+}
+.suggestions li.empty {
+  cursor: default;
+  color: var(--doux);
+}
+
+/* Ce qu'on a choisi, une ligne par element, retirable sur place. */
+.picked {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0;
+}
+.picked li {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--bord);
+  border-radius: var(--rayon);
+  margin-bottom: 0.4rem;
+  background: var(--fond);
+}
+.picked li > span:first-child {
+  flex: 1;
+}
+.picked em {
+  font-style: normal;
+  font-size: 0.8rem;
+  color: var(--doux);
+}
+
 /* Du markdown s'ecrit au chasse fixe : l'alignement d'un tableau ou d'une
    liste se voit, et les espaces significatifs se comptent. */
 textarea.prose {

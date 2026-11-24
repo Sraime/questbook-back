@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from './api';
+import { Autocomplete, type Choice } from './Autocomplete';
 import { formatDate } from './format';
 import { ScenarioOwners } from './ScenarioOwners';
 import type { AdminAsset, ScenarioDetail } from './types';
@@ -132,6 +133,22 @@ export function ScenarioEditor({
       )
       .catch(onError);
   }, [onError]);
+
+  const tokenChoices: Choice[] = [
+    ...SOCLES.map((socle) => ({ id: socle.ref, label: socle.label, hint: 'Pion de joueur' })),
+    ...tokens.map((asset) => ({
+      id: `asset:${asset.key}`,
+      label: asset.title,
+      hint: asset.available ? 'Asset' : 'Asset retiré de la vente',
+    })),
+  ];
+
+  // Un pion d'un asset que la liste ne connait pas encore — elle se charge, ou
+  // l'asset a change de nature — se montre par sa cle plutot que par rien.
+  const tokenLabel = (token: string | null) =>
+    token === null
+      ? 'Aucun'
+      : (tokenChoices.find((choice) => choice.id === token)?.label ?? token);
 
   const change = (patch: Partial<Draft>) => {
     setDraft((current) => ({ ...current, ...patch }));
@@ -388,31 +405,33 @@ export function ScenarioEditor({
               maxLength={10_000}
               placeholder="Ce qu’il sait, ce qu’il cache."
             />
-            <label className="note">
+            <div className="note">
               Pion — celui qu’il a d’office sur le plateau, que le meneur peut changer
-              <select
-                value={npc.token ?? ''}
-                onChange={(event) =>
-                  change({
-                    npcs: patched(draft.npcs, index, {
-                      token: event.target.value === '' ? null : event.target.value,
-                    }),
-                  })
+              <ul className="picked">
+                <li>
+                  <span>
+                    <strong>{tokenLabel(npc.token)}</strong>
+                  </span>
+                  {npc.token !== null && (
+                    <button
+                      className="link destructive"
+                      onClick={() =>
+                        change({ npcs: patched(draft.npcs, index, { token: null }) })
+                      }
+                    >
+                      Retirer
+                    </button>
+                  )}
+                </li>
+              </ul>
+              <Autocomplete
+                choices={tokenChoices.filter((choice) => choice.id !== npc.token)}
+                onPick={(choice) =>
+                  change({ npcs: patched(draft.npcs, index, { token: choice.id }) })
                 }
-              >
-                <option value="">Aucun</option>
-                {SOCLES.map((socle) => (
-                  <option key={socle.ref} value={socle.ref}>
-                    {socle.label}
-                  </option>
-                ))}
-                {tokens.map((asset) => (
-                  <option key={asset.key} value={`asset:${asset.key}`}>
-                    {asset.title}
-                  </option>
-                ))}
-              </select>
-            </label>
+                placeholder={npc.token === null ? 'Chercher un pion…' : 'Changer de pion…'}
+              />
+            </div>
           </div>
         ))}
 

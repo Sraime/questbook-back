@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, imageUrl } from './api';
 import { kindLabels } from './AssetEditor';
+import { Autocomplete, type Choice } from './Autocomplete';
 import { formatDate } from './format';
 import type { AdminAsset, AdminBundle, ScenarioSummary } from './types';
 
@@ -68,10 +69,57 @@ export function BundleEditor({ bundle, onSaved, onDirtyChange, onError }: Bundle
     onDirtyChange(true);
   };
 
-  const toggle = (list: 'assetItemIds' | 'scenarioIds', id: string, on: boolean) =>
-    change({
-      [list]: on ? [...draft[list], id] : draft[list].filter((each) => each !== id),
-    });
+  // La nature prefixe l'identifiant : un scenario et un article vivent dans
+  // deux tables, et l'ecran les melange dans une meme liste.
+  const add = (key: string) => {
+    const [kind, id] = key.split(':') as ['asset' | 'scenario', string];
+    const list = kind === 'asset' ? 'assetItemIds' : 'scenarioIds';
+    if (!draft[list].includes(id)) change({ [list]: [...draft[list], id] });
+  };
+
+  const remove = (key: string) => {
+    const [kind, id] = key.split(':') as ['asset' | 'scenario', string];
+    const list = kind === 'asset' ? 'assetItemIds' : 'scenarioIds';
+    change({ [list]: draft[list].filter((each) => each !== id) });
+  };
+
+  const assetHint = (asset: AdminAsset) =>
+    asset.kind === null ? 'Pion embarqué dans l’app' : kindLabels[asset.kind];
+
+  // Ce qui est deja dans le bundle ne se propose plus.
+  const choices: Choice[] = [
+    ...(scenarios ?? [])
+      .filter((scenario) => !draft.scenarioIds.includes(scenario.id))
+      .map((scenario) => ({ id: `scenario:${scenario.id}`, label: scenario.title, hint: 'Scénario' })),
+    ...(assets ?? [])
+      .filter((asset) => !draft.assetItemIds.includes(asset.itemId))
+      .map((asset) => ({ id: `asset:${asset.itemId}`, label: asset.title, hint: assetHint(asset) })),
+  ];
+
+  // Ce que le bundle contient, lu dans les catalogues charges ; a defaut, dans
+  // ce que le serveur a renvoye, le temps que ceux-ci arrivent.
+  const known = new Map(bundle?.contents.map((entry) => [`${entry.kind}:${entry.id}`, entry]));
+  const contents = [
+    ...draft.scenarioIds.map((id) => {
+      const scenario = scenarios?.find((each) => each.id === id);
+      return {
+        key: `scenario:${id}`,
+        title: scenario?.title ?? known.get(`scenario:${id}`)?.title ?? '…',
+        hint: 'Scénario',
+        withdrawn: false,
+      };
+    }),
+    ...draft.assetItemIds.map((id) => {
+      const asset = assets?.find((each) => each.itemId === id);
+      const saved = known.get(`asset:${id}`);
+      return {
+        key: `asset:${id}`,
+        title: asset?.title ?? saved?.title ?? '…',
+        hint: asset ? assetHint(asset) : 'Asset',
+        withdrawn: asset ? !asset.available : saved ? !saved.available : false,
+      };
+    }),
+  ];
 
   const pick = (file: File | undefined) => {
     setFileError(null);
@@ -217,48 +265,43 @@ export function BundleEditor({ bundle, onSaved, onDirtyChange, onError }: Bundle
       </div>
 
       <div className="block">
-        <h3>Scénarios</h3>
-        {scenarios === null && <p className="muted">Chargement…</p>}
-        {scenarios?.map((scenario) => (
-          <label className="check" key={scenario.id}>
-            <input
-              type="checkbox"
-              checked={draft.scenarioIds.includes(scenario.id)}
-              onChange={(event) => toggle('scenarioIds', scenario.id, event.target.checked)}
-            />
-            <span>
-              <strong>{scenario.title}</strong>
-              <em>
-                {scenario.npcs} PNJ · {scenario.clues} indice{scenario.clues > 1 ? 's' : ''}
-              </em>
-            </span>
-          </label>
-        ))}
-      </div>
-
-      <div className="block">
-        <h3>Assets</h3>
+        <h3>Contenu</h3>
         <p className="muted small">
-          Ceux qui ne sont pas en vente se donnent aussi : le bundle est alors le seul moyen
-          de les obtenir.
+          Un scénario ou un asset, en vente ou non : ce qui ne se vend pas seul n’est alors
+          obtenu que par le bundle.
         </p>
-        {assets === null && <p className="muted">Chargement…</p>}
-        {assets?.map((asset) => (
-          <label className="check" key={asset.itemId}>
-            <input
-              type="checkbox"
-              checked={draft.assetItemIds.includes(asset.itemId)}
-              onChange={(event) => toggle('assetItemIds', asset.itemId, event.target.checked)}
-            />
-            <span>
-              <strong>{asset.title}</strong>
-              <em>
-                {asset.kind === null ? 'Embarqué dans l’app' : kindLabels[asset.kind]}
-                {asset.available ? '' : ' · retiré de la vente'}
-              </em>
-            </span>
-          </label>
-        ))}
+        <Autocomplete
+          choices={choices}
+          onPick={(choice) => add(choice.id)}
+          placeholder={
+            assets === null || scenarios === null
+              ? 'Chargement…'
+              : 'Chercher un scénario ou un asset…'
+          }
+          disabled={assets === null || scenarios === null}
+        />
+
+        {contents.length === 0 ? (
+          <p className="muted small">Rien encore.</p>
+        ) : (
+          <ul className="picked">
+            {contents.map((entry) => (
+              <li key={entry.key}>
+                <span>
+                  <strong>{entry.title}</strong>
+                  <br />
+                  <em>
+                    {entry.hint}
+                    {entry.withdrawn ? ' · retiré de la vente' : ''}
+                  </em>
+                </span>
+                <button className="link destructive" onClick={() => remove(entry.key)}>
+                  Retirer
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <div className="save">
