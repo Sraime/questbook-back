@@ -63,6 +63,9 @@ export interface ScenarioNpc {
   id: string;
   name: string;
   description: string;
+  /// Le pion que la seance lui donne d'office : `asset:<cle>` ou
+  /// `socle:<couleur>`.
+  token: string | null;
 }
 
 export interface ScenarioClue {
@@ -126,6 +129,27 @@ export interface AdminAsset {
   height: number | null;
   available: boolean;
   owners: number;
+  updatedAt: string;
+}
+
+/// Ce qu'un bundle donne : un article `asset` ou un scenario. `available`
+/// dit s'il se vend aussi seul, ce que le bundle ne demande pas.
+export interface AdminBundleEntry {
+  kind: 'asset' | 'scenario';
+  id: string;
+  title: string;
+  available: boolean;
+}
+
+export interface AdminBundle {
+  itemId: string;
+  title: string;
+  description: string;
+  priceCents: number;
+  available: boolean;
+  imageHash: string | null;
+  owners: number;
+  contents: AdminBundleEntry[];
   updatedAt: string;
 }
 

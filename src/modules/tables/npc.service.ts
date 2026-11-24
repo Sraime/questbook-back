@@ -76,8 +76,15 @@ export class NpcService {
     const tokenOf = (id: string) => tokens.get(id) ?? null;
 
     return [
+      // The author's token until the game master says otherwise, « Aucun »
+      // included: a row holding `null` is his choice, its absence is not.
       ...scenario.npcs.map((npc) =>
-        fromScenario(npc, sessionId, scenario.updatedAt, tokenOf(npc.id)),
+        fromScenario(
+          npc,
+          sessionId,
+          scenario.updatedAt,
+          tokens.has(npc.id) ? tokenOf(npc.id) : npc.token,
+        ),
       ),
       ...rows.map((row) => toDto(row, tokenOf(row.id))),
     ];
@@ -99,7 +106,14 @@ export class NpcService {
       throw notFound('Non-player character not found');
     }
 
-    if (token === null) {
+    // Taking away a token the scenario gave has to be written down, or the
+    // author's would come straight back.
+    const authored =
+      npc.origin === 'scenario' &&
+      (await this.prisma.scenarioNpc.findUnique({ where: { id: npcId }, select: { token: true } }))
+        ?.token != null;
+
+    if (token === null && !authored) {
       await this.prisma.sessionNpcToken.deleteMany({ where: { sessionId, npcId } });
     } else {
       await this.prisma.sessionNpcToken.upsert({

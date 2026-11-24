@@ -232,6 +232,39 @@ describe('non-player characters', () => {
       });
     });
 
+    it('starts from the one the author gave, which « Aucun » can still override', async () => {
+      const { gm, sessionId } = await tableWithSession();
+      const scenario = await prisma.scenario.create({
+        data: {
+          title: 'Le Phare de Kerloc’h',
+          description: 'Un gardien disparaît.',
+          context: 'Kerloc’h, 1924.',
+          minRecommendedPlayers: 2,
+          maxRecommendedPlayers: 5,
+          averageDurationMinutes: 180,
+          rundownMarkdown: '## Mise en place',
+          npcs: {
+            create: [{ name: 'Le gardien', description: '', sortOrder: 0, token: 'socle:blue' }],
+          },
+        },
+        include: { npcs: true },
+      });
+      await prisma.gameSession.update({
+        where: { id: sessionId },
+        data: { scenarioId: scenario.id },
+      });
+      const keeper = scenario.npcs[0]!;
+
+      expect((await listNpcs(gm, sessionId)).json().npcs[0].token).toBe('socle:blue');
+
+      await setToken(gm, sessionId, keeper.id, 'socle:red');
+      expect((await listNpcs(gm, sessionId)).json().npcs[0].token).toBe('socle:red');
+
+      // Taking it away sticks, rather than bringing the author's back.
+      await setToken(gm, sessionId, keeper.id, null);
+      expect((await listNpcs(gm, sessionId)).json().npcs[0].token).toBeNull();
+    });
+
     it('is the game master’s to give, and only a known shape', async () => {
       const { gm, player, sessionId } = await tableWithSession();
       const npc = (await addNpc(gm, sessionId, { name: 'Le rôdeur' })).json();

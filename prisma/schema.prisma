@@ -283,7 +283,9 @@ model SessionNpc {
 model SessionNpcToken {
   sessionId String @map("session_id")
   npcId     String @map("npc_id")
-  token     String
+  /// `null` is a choice, not an absence: « Aucun » on a scenario character
+  /// whose author gave it a token. Without the row, that token applies.
+  token     String?
 
   session GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
@@ -358,6 +360,7 @@ model Scenario {
   ownerships ScenarioOwnership[]
   sessions   GameSession[]
   shopItems  ShopItem[]
+  bundleEntries ShopBundleEntry[]
 
   @@map("scenarios")
 }
@@ -375,6 +378,9 @@ model ScenarioNpc {
   sortOrder   Int    @map("sort_order")
   name        String
   description String @default("") @db.Text
+  /// The token the author meant for it, `asset:<key>` or `socle:<color>`. A
+  /// session starts from it, and the game master may still pick another.
+  token       String?
 
   scenario Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
 
@@ -433,8 +439,8 @@ model ScenarioClueAccess {
 model ShopItem {
   id          String   @id @default(uuid())
   title       String
-  /// `asset`, `scenario` or `pack` — stored as text like other enumerations
-  /// here. `pack` has no content model yet and cannot be purchased.
+  /// `asset`, `scenario` or `bundle` — stored as text like other enumerations
+  /// here. A `bundle` sells what [ShopBundleEntry] lists under it.
   type        String
   description String   @db.Text
   /// In cents, so no rounding ever happens in the app. `0` is the free
@@ -450,14 +456,46 @@ model ShopItem {
   /// deleted: deleting would cascade into who owns it, and a token already
   /// on a board must keep its drawing.
   available   Boolean  @default(true)
+  /// A picture sent from the backoffice, which only bundles have: unlike an
+  /// asset, a bundle has no drawing of its own to borrow. Takes precedence
+  /// over `imageKey` when present.
+  image       Bytes?
+  imageType   String?  @map("image_type")
+  /// SHA-256 of `image`, which the app names its cached copy after.
+  imageHash   String?  @map("image_hash")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  scenario   Scenario?           @relation(fields: [scenarioId], references: [id], onDelete: SetNull)
-  ownerships ShopItemOwnership[]
+  scenario       Scenario?           @relation(fields: [scenarioId], references: [id], onDelete: SetNull)
+  ownerships     ShopItemOwnership[]
+  bundleEntries  ShopBundleEntry[]   @relation("BundleContent")
+  includedIn     ShopBundleEntry[]   @relation("BundledAsset")
 
   @@index([sortOrder])
   @@map("shop_items")
+}
+
+/// One thing a bundle hands over: an `asset` article or a scenario, exactly
+/// one of the two. Both must already exist, on sale or not — a bundle
+/// gathers what the catalogue has, it does not create anything.
+///
+/// A scenario is named directly rather than through an article: an adventure
+/// may exist without ever being sold on its own.
+model ShopBundleEntry {
+  id          String  @id @default(uuid())
+  bundleId    String  @map("bundle_id")
+  sortOrder   Int     @map("sort_order")
+  assetItemId String? @map("asset_item_id")
+  scenarioId  String? @map("scenario_id")
+
+  bundle    ShopItem  @relation("BundleContent", fields: [bundleId], references: [id], onDelete: Cascade)
+  assetItem ShopItem? @relation("BundledAsset", fields: [assetItemId], references: [id], onDelete: Cascade)
+  scenario  Scenario? @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+
+  @@unique([bundleId, assetItemId], map: "shop_bundle_entries_bundle_asset_key")
+  @@unique([bundleId, scenarioId], map: "shop_bundle_entries_bundle_scenario_key")
+  @@index([bundleId, sortOrder])
+  @@map("shop_bundle_entries")
 }
 
 /// A token whose drawing the server hosts, written from the backoffice.
