@@ -699,6 +699,16 @@ button.link.destructive {
   background: var(--fond);
   border: 1px solid var(--bord);
 }
+/* Une carte n'est pas un pion : elle couvre le plateau, et se montre entiere. */
+.asset-thumb.map,
+.asset-empty.map,
+.asset-image img.map {
+  border-radius: 6px;
+  object-fit: cover;
+}
+.asset-image img.map {
+  height: auto;
+}
 .asset-image input[type='file'] {
   display: block;
   margin-top: 0.4rem;

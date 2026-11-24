@@ -8,9 +8,9 @@ import {
 } from './admin-asset.schemas.js';
 import { AdminAssetService } from './admin-asset.service.js';
 
-/// Une image de 2 Mo pese pres de 2,7 Mo une fois en base64 : la limite de
+/// Une carte de 5 Mo pese pres de 6,7 Mo une fois en base64 : la limite de
 /// 1 Mo que Fastify applique par defaut ne la laisserait pas passer.
-const IMAGE_BODY_LIMIT = 4 * 1024 * 1024;
+const IMAGE_BODY_LIMIT = 8 * 1024 * 1024;
 
 /// Les assets de la boutique s'ajoutent ici, sans release de l'app. Rien ne
 /// se supprime : un article retire de la vente reste a ceux qui l'ont, et un

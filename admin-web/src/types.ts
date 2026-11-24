@@ -109,10 +109,11 @@ export interface ScenarioOwners {
   owners: ScenarioOwner[];
 }
 
-export type AssetKind = 'character' | 'environment' | 'effect';
+export type AssetKind = 'character' | 'environment' | 'effect' | 'map';
 
-/// Un article `asset` de la boutique et le pion qu'il vend. `hosted` est faux
-/// pour ceux qu'embarque l'app : ils n'ont ici ni nature ni image.
+/// Un article `asset` de la boutique et le pion ou la carte qu'il vend.
+/// `hosted` est faux pour ceux qu'embarque l'app : ils n'ont ici ni nature ni
+/// image.
 export interface AdminAsset {
   itemId: string;
   key: string;
@@ -121,6 +122,8 @@ export interface AdminAsset {
   kind: AssetKind | null;
   hosted: boolean;
   imageHash: string | null;
+  width: number | null;
+  height: number | null;
   available: boolean;
   owners: number;
   updatedAt: string;

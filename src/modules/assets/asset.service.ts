@@ -9,6 +9,10 @@ export interface AssetDto {
   name: string;
   kind: string;
   imageHash: string;
+  /// In pixels. What a map gives the board as proportions; null only on
+  /// tokens hosted before maps existed.
+  width: number | null;
+  height: number | null;
 }
 
 export class AssetService {
@@ -19,7 +23,7 @@ export class AssetService {
   /// never depend on having bought it, nor on it still being on sale.
   async list(): Promise<AssetDto[]> {
     return this.prisma.asset.findMany({
-      select: { key: true, name: true, kind: true, imageHash: true },
+      select: { key: true, name: true, kind: true, imageHash: true, width: true, height: true },
       orderBy: { name: 'asc' },
     });
   }
