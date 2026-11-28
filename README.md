@@ -979,6 +979,9 @@ la supprimer.
 | `GET`    | `/sessions/:id/board`                          | Le plateau, lisible par toute la table            |
 | `PUT`    | `/sessions/:id/board`                          | Le remplacer entier (MJ)                          |
 | `GET`    | `/sessions/:id/board/live`                     | WebSocket : le plateau, puis chaque poussée       |
+| `GET`    | `/sessions/:id/projection`                     | `{ "active" }` : un lien de projection vaut-il (MJ) |
+| `POST`   | `/sessions/:id/projection`                     | Un nouveau lien public, qui révoque l'ancien (MJ, 201) |
+| `DELETE` | `/sessions/:id/projection`                     | Arrêter la projection (MJ, 204)                   |
 
 Le MJ n'est pas un participant : il anime la séance, ne répond pas et n'est pas
 compté parmi les joueurs attendus. `PUT /sessions/:id/attendance` lui répond 403.
@@ -1149,6 +1152,58 @@ processus, et chaque client se reconnecte et redemande le plateau.
 Un socket qui refuse un message est retiré plutôt que réessayé : le plateau est
 un état, pas un flux d'événements, donc la poussée suivante porte tout ce que
 la manquée portait.
+
+##### Le mode projection
+
+Le MJ montre le plateau à la salle — télé, vidéoprojecteur, ordinateur — par
+un **lien public, sans compte** : `POST /sessions/:id/projection` rend
+`{ "url", "opensAt", "closesAt" }`, et `https://<domaine>/projection/<jeton>`
+affiche le plateau en lecture seule, synchronisé en direct.
+
+| Méthode | Route (publique)                          | Rôle                                          |
+| ------- | ----------------------------------------- | --------------------------------------------- |
+| `GET`   | `/projection/:token`                      | La page HTML                                  |
+| `GET`   | `/projection/:token/live`                 | WebSocket : le plateau nettoyé, puis chaque poussée |
+| `GET`   | `/projection/:token/assets`               | Les assets hébergés, pour dessiner cartes et pions |
+| `GET`   | `/projection/:token/assets/:key/image`    | Leur image                                    |
+| `GET`   | `/projection/static/:file`                | Script, style, et les images que l'app embarque |
+
+Ce que ce lien ne peut pas faire est tout l'enjeu, et chaque point tient
+ailleurs que dans la bonne volonté de la page :
+
+- **Il n'écrit rien.** Aucune route `POST`, `PUT` ni `DELETE` sous
+  `/projection`, et la WebSocket ferme (code `1008`) toute connexion qui lui
+  envoie un message. Le jeton n'est pas une identité : il ne se présente à
+  aucune autre route.
+- **Il ne vit que pendant la séance**, de `startsAt` à la clôture vingt-quatre
+  heures plus tard, et jamais pour une séance annulée. Avant : `403`, après :
+  `410`, sinon `404`. Une WebSocket ouverte se ferme d'elle-même à la clôture.
+- **Un seul lien par séance**, stocké haché (`game_sessions.projection_token_hash`)
+  comme tous les jetons. En générer un autre révoque l'ancien, et
+  `closeProjections` éteint aussitôt les écrans qu'il avait ouverts — de même
+  à l'arrêt et à l'annulation. Le serveur ne sait pas redonner un lien :
+  l'app du MJ le garde dans son cache local.
+- **Le plateau est nettoyé** (`projection.board.ts`) : des pions, seuls
+  `id`, `kind`, `color`, `x`, `y`, `size` et `assetKey` passent, recopiés un
+  par un. Le lien d'un pion vers son personnage — l'identifiant d'un joueur,
+  d'un PNJ pas encore rencontré — ne quitte jamais le serveur, et un champ
+  ajouté demain par l'app n'y passera pas sans qu'on l'ait décidé.
+- **La page ne charge que ce qui vient d'ici** : `Content-Security-Policy`
+  avec `default-src 'none'`, script et style servis par l'API, aucun code en
+  ligne, `frame-ancestors 'none'`, `no-store`, `noindex`.
+- **Le jeton n'entre pas dans les journaux** : masqué par l'API
+  (`redactLoggedUrl`) comme par Caddy, comme celui des invitations.
+
+Le dessin, dans `web/projection/projection.js`, reprend celui du plateau
+joueur de l'app (`watched_board_panel.dart`, `board_token_view.dart`). Les deux
+cartes et le pion que l'app embarque y sont recopiés (`manoir-clairiere.jpg`,
+`grand-ancien.png`) : la page n'a pas l'app sous la main pour les lui
+emprunter. **Ajouter une carte ou un pion embarqué à l'app, c'est aussi
+l'ajouter ici**, sans quoi la salle verrait la carte par défaut ou un rond
+rouge.
+
+Le `Caddyfile` change avec cette fonctionnalité (masquage du jeton) : au
+déploiement, recréer le conteneur `caddy`, que `deploy.sh` laisse en place.
 
 #### Les deux instants qui bornent une séance
 
