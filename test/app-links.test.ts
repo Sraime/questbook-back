@@ -99,6 +99,22 @@ describe('the files phones read before trusting a link', () => {
     expect(response.json()[0].target.package_name).toBe('com.questbook.questbook');
   });
 
+  it('lists well-formed SHA-256 fingerprints, without duplicates', async () => {
+    // Une seule empreinte mal recopiee, et Android rejette la verification
+    // sans rien en dire : le lien ouvre alors le navigateur.
+    const response = await context.app.inject({
+      method: 'GET',
+      url: '/.well-known/assetlinks.json',
+    });
+    const fingerprints: string[] = response.json()[0].target.sha256_cert_fingerprints;
+
+    expect(fingerprints.length).toBeGreaterThanOrEqual(2);
+    for (const fingerprint of fingerprints) {
+      expect(fingerprint).toMatch(/^([0-9A-F]{2}:){31}[0-9A-F]{2}$/);
+    }
+    expect(new Set(fingerprints).size).toBe(fingerprints.length);
+  });
+
   it('serves the Apple association as JSON, for invitations only', async () => {
     const response = await context.app.inject({
       method: 'GET',

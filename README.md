@@ -1501,11 +1501,13 @@ pour le compte qui porte l'adresse invitée, tant que le code n'a pas servi.
 L'API les sert elle-même : tout ce qui n'est pas une page légale part déjà vers
 elle, et le `Caddyfile` n'a pas à changer.
 
-Les empreintes SHA-256 d'`assetlinks.json` sont celles des **deux** certificats
-qui signent l'app : la clé d'upload (builds Firebase) et la clé de Google Play
-(ce que le store livre). Elles se lisent dans la Play Console, **Test et
-publication > Intégrité de l'application**. Sans la seconde, l'app du Play
-Store ne serait pas vérifiée et le lien ouvrirait le navigateur.
+Les empreintes SHA-256 d'`assetlinks.json` sont celles de **tous** les
+certificats qui ont signé une app encore installée quelque part : la clé
+d'importation (builds Firebase), la clé de Google Play en cours, et la
+précédente — un téléphone garde l'app signée par l'ancienne clé jusqu'à sa mise
+à jour. Elles se lisent dans la Play Console, **Protégé avec Play > Signature
+d'application**, colonne « Clé classique ». Une empreinte qui manque, et
+l'app concernée n'est pas vérifiée : le lien ouvre le navigateur.
 
 Côté Apple, le fichier ne suffit pas : l'App ID doit porter la capacité
 **Associated Domains**, et les profils de provisionnement doivent être

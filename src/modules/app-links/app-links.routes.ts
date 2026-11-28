@@ -4,11 +4,19 @@ const PACKAGE_NAME = 'com.questbook.questbook';
 const APPLE_APP_ID = '97X67224S7.com.questbook.questbook';
 
 /// Les certificats dont Android accepte qu'ils signent l'app qui ouvre nos
-/// liens. Il en faut deux : la cle d'upload, qui signe les builds distribues
-/// aux testeurs, et celle de Google Play, qui re-signe ce que le store livre.
-/// Les deux se lisent dans la Play Console, Test et publication > Integrite
-/// de l'application. Ce ne sont pas des secrets : ce fichier est public.
-const ANDROID_CERT_SHA256: string[] = [];
+/// liens. Ils se lisent dans la Play Console, Protege avec Play > Signature
+/// d'application. Ce ne sont pas des secrets : ce fichier est public.
+///
+/// Changer de cle de signature dans la console n'en retire aucune ici : les
+/// telephones gardent l'app signee par l'ancienne jusqu'a sa mise a jour.
+const ANDROID_CERT_SHA256 = [
+  // Cle de signature Google Play, en cours d'utilisation.
+  'F4:09:F0:F4:E7:09:CC:7D:7C:EA:41:B4:BC:D2:68:5F:CE:64:D6:25:C0:D1:F2:45:74:23:A1:BF:3A:55:72:A1',
+  // Cle de signature Google Play precedente, en usage depuis le 21 septembre 2026.
+  'F9:19:2E:EB:45:A4:94:5D:3B:6E:0A:C9:F6:23:65:22:AC:5A:A0:B1:30:66:2E:9A:8E:A9:4F:63:5F:82:5C:BC',
+  // Cle d'importation : signe les builds distribues aux testeurs par Firebase.
+  '03:76:4B:00:30:15:D5:A2:C2:A7:38:6F:27:51:C0:59:B1:2B:85:51:A2:55:AC:A0:2A:E1:8E:0A:DD:D5:6B:DE',
+];
 
 /// Ce que lisent Android et iOS pour croire qu'un lien `https` de ce domaine
 /// peut ouvrir l'app plutot que le navigateur. Ils les reclament sans
