@@ -73,5 +73,8 @@ const resolutionLabels: Record<string, string> = {
 export const resolutionLabel = (resolution: string | null): string =>
   resolution === null ? '—' : (resolutionLabels[resolution] ?? resolution);
 
-export const partyLabel = (party: { email: string; displayName: string | null }): string =>
-  party.displayName === null ? party.email : `${party.displayName} · ${party.email}`;
+/// Un compte Apple peut n'avoir aucune adresse : il ne reste alors que le
+/// pseudo, voire rien.
+export const partyLabel = (party: { email: string | null; displayName: string | null }): string =>
+  [party.displayName, party.email].filter((part) => part !== null).join(' · ') ||
+  '(sans pseudo ni adresse)';

@@ -42,6 +42,17 @@ export async function invite(
   return token;
 }
 
+/// What the app does once the link has opened it: the signed-in account
+/// spends the code.
+export function redeem(context: TestContext, player: SignedInUser, code: string) {
+  return context.app.inject({
+    method: 'POST',
+    url: '/api/v1/invitations/redeem',
+    headers: player.authHeader,
+    payload: { code },
+  });
+}
+
 export async function joinTable(
   context: TestContext,
   gm: SignedInUser,
@@ -49,9 +60,6 @@ export async function joinTable(
   tableId: string,
 ): Promise<void> {
   const token = await invite(context, gm, tableId, player.email);
-  const response = await context.app.inject({
-    method: 'POST',
-    url: `/invitations/${token}/accept`,
-  });
+  const response = await redeem(context, player, token);
   expect(response.statusCode).toBe(200);
 }

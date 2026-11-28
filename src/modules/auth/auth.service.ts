@@ -1,5 +1,5 @@
 import type { PrismaClient, User } from '@prisma/client';
-import { badRequest, conflict, unauthorized } from '../../lib/errors.js';
+import { conflict, unauthorized } from '../../lib/errors.js';
 import { hashToken, randomToken } from '../../lib/tokens.js';
 import { requireNotSuspended } from './suspension.js';
 import type { AppleVerifier } from './apple-verifier.js';
@@ -18,7 +18,8 @@ export interface AuthResult extends AuthTokens {
 
 export interface PublicUser {
   id: string;
-  email: string;
+  /// Null for an Apple account that kept its address to itself.
+  email: string | null;
   displayName: string | null;
   pictureUrl: string | null;
 
@@ -101,8 +102,9 @@ export class AuthService {
   ///   ici, et on ne lui fait pas plus confiance qu'au renommage : le joueur
   ///   peut le changer ensuite, et c'est tout ce que ce champ vaut.
   /// - **L'adresse peut manquer**, si le compte a été autorisé sans la
-  ///   partager. Une table s'invite par adresse : sans elle, il n'y a pas de
-  ///   compte à créer, et le dire vaut mieux qu'inventer une adresse interne.
+  ///   partager. Le compte se crée quand même, sans adresse : une table se
+  ///   rejoint par le code du lien d'invitation, pas par l'adresse à laquelle
+  ///   il a été envoyé.
   /// - **Rien ne se rafraîchit aux connexions suivantes.** L'adresse d'un
   ///   relais privé est stable, et c'est la seule chose qu'Apple redonne.
   async signInWithApple(identityToken: string, displayName?: string): Promise<AuthResult> {
@@ -119,16 +121,11 @@ export class AuthService {
       return { ...tokens, user: toPublicUser(existing) };
     }
 
-    if (!identity.email) {
-      throw badRequest(
-        'Apple account shared no email address, which Questbook needs to invite you to a table',
-      );
-    }
-    if (!identity.emailVerified) {
+    if (identity.email && !identity.emailVerified) {
       throw unauthorized('Apple account email is not verified');
     }
 
-    const email = identity.email.trim().toLowerCase();
+    const email = identity.email ? identity.email.trim().toLowerCase() : null;
     const trimmedName = displayName?.trim();
 
     const user = await this.options.prisma.user
@@ -256,7 +253,9 @@ export class AuthService {
 
   /// Invitations sent to a mailbox before it had an account become visible
   /// the moment that address signs in.
-  private async claimInvitations(userId: string, email: string): Promise<void> {
+  private async claimInvitations(userId: string, email: string | null): Promise<void> {
+    if (email === null) return;
+
     await this.options.prisma.tableInvitation.updateMany({
       where: { email, invitedUserId: null, status: 'pending' },
       data: { invitedUserId: userId },

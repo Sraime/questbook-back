@@ -121,8 +121,8 @@ export function ScenarioOwners({ scenarioId, grantOnSignup, onError }: ScenarioO
           {state.owners.map((owner) => (
             <li key={owner.userId}>
               <span className="who">
-                <strong>{owner.displayName ?? owner.email}</strong>
-                {owner.displayName !== null && <em>{owner.email}</em>}
+                <strong>{owner.displayName ?? owner.email ?? '(sans pseudo ni adresse)'}</strong>
+                {owner.displayName !== null && owner.email !== null && <em>{owner.email}</em>}
               </span>
               <span className="muted small">
                 {owner.source === 'purchase' ? 'Achetée' : 'Donnée'} le{' '}

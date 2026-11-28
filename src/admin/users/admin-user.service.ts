@@ -6,7 +6,7 @@ import type { DeleteUserInput, SuspendUserInput } from './admin-user.schemas.js'
 
 export interface AdminUserDetail {
   id: string;
-  email: string;
+  email: string | null;
   displayName: string | null;
   createdAt: string;
   suspended: boolean;
@@ -24,7 +24,7 @@ export interface AdminUserDetail {
 /// est pas — il coute une jointure par ligne et ne sert qu'a la fermeture.
 export interface SuspendedUserSummary {
   id: string;
-  email: string;
+  email: string | null;
   displayName: string | null;
   suspendedAt: string;
   suspendedUntil: string | null;
@@ -191,7 +191,10 @@ export class AdminUserService {
       throw notFound('Compte introuvable');
     }
 
-    if (input.confirmEmail.trim().toLowerCase() !== user.email.toLowerCase()) {
+    // Un compte Apple peut n'avoir aucune adresse : c'est alors son
+    // identifiant qu'on recopie.
+    const expected = user.email ?? user.id;
+    if (input.confirmEmail.trim().toLowerCase() !== expected.toLowerCase()) {
       throw badRequest("L'adresse de confirmation ne correspond pas a ce compte.");
     }
 
