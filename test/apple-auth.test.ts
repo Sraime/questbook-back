@@ -76,14 +76,28 @@ describe('Apple authentication', () => {
     expect(response.json().user.displayName).toBeNull();
   });
 
-  it('refuses to create an account with no email address', async () => {
-    // Une table s'invite par adresse : sans elle il n'y a pas de compte a
-    // creer, et le dire vaut mieux qu'en fabriquer une.
+  it('creates an account with no email address, and finds it again', async () => {
+    // Une table se rejoint par le code du lien d'invitation, plus par
+    // l'adresse : rien ne justifie plus de refuser ce compte.
     context.apple.register('apple-token', { sub: '000123.abc.0005', email: null });
 
-    const response = await signInWithApple('apple-token');
-    expect(response.statusCode).toBe(400);
-    expect(await prisma.user.count()).toBe(0);
+    const first = await signInWithApple('apple-token');
+    expect(first.statusCode).toBe(200);
+    expect(first.json().user.email).toBeNull();
+
+    const second = await signInWithApple('apple-token');
+    expect(second.json().user.id).toBe(first.json().user.id);
+    expect(await prisma.user.count()).toBe(1);
+  });
+
+  it('lets two accounts without an address live side by side', async () => {
+    // L'index unique sur l'adresse ne doit pas les confondre.
+    context.apple.register('apple-a', { sub: '000123.abc.0010', email: null });
+    context.apple.register('apple-b', { sub: '000123.abc.0011', email: null });
+
+    expect((await signInWithApple('apple-a')).statusCode).toBe(200);
+    expect((await signInWithApple('apple-b')).statusCode).toBe(200);
+    expect(await prisma.user.count()).toBe(2);
   });
 
   it('refuses an unverified email', async () => {

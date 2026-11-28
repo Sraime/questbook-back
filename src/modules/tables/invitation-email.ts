@@ -5,9 +5,6 @@ export interface InvitationEmailInput {
   tableTitle: string;
   inviterName: string;
   acceptUrl: string;
-  /// When the mailbox has no Questbook account yet, the mail tells them to
-  /// install the app first. The accept link still works as a reminder page.
-  needsAccount?: boolean;
 }
 
 /// Escapes the values interpolated into the HTML body. A table title is
@@ -20,23 +17,26 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
+/// One message whoever receives it: the link no longer cares which account
+/// opens it, so there is nothing to tell an unknown mailbox that a known one
+/// would not need too.
 export function renderInvitationEmail(input: InvitationEmailInput): EmailMessage {
   const title = escapeHtml(input.tableTitle);
   const inviter = escapeHtml(input.inviterName);
   const url = escapeHtml(input.acceptUrl);
 
-  if (input.needsAccount) {
-    return {
-      to: input.to,
-      subject: `${input.inviterName} t'invite à rejoindre « ${input.tableTitle} »`,
-      text: [
-        `${input.inviterName} t'invite à rejoindre sa table « ${input.tableTitle} » sur Questbook.`,
-        '',
-        'Tu n’as pas encore de compte : installe Questbook, connecte-toi avec cette adresse, puis ouvre l’onglet Tables. L’invitation t’y attend.',
-        '',
-        `Plus d’infos : ${input.acceptUrl}`,
-      ].join('\n'),
-      html: `<!doctype html>
+  return {
+    to: input.to,
+    subject: `${input.inviterName} t'invite à rejoindre « ${input.tableTitle} »`,
+    text: [
+      `${input.inviterName} t'invite à rejoindre sa table « ${input.tableTitle} » sur Questbook.`,
+      '',
+      `Ouvre ce lien depuis ton téléphone : ${input.acceptUrl}`,
+      '',
+      'Il t’emmène dans Questbook, ou vers le store pour l’installer si tu ne l’as pas encore.',
+      'Ce lien est personnel et ne sert qu’une fois : une fois la table rejointe, il ne fonctionne plus.',
+    ].join('\n'),
+    html: `<!doctype html>
 <html lang="fr">
   <body style="margin:0;padding:24px;background:#f4ecd8;font-family:Georgia,serif;color:#2b2118">
     <div style="max-width:520px;margin:0 auto;background:#fbf6ea;border:3px solid #6b4f2a;border-radius:10px;padding:28px">
@@ -45,47 +45,17 @@ export function renderInvitationEmail(input: InvitationEmailInput): EmailMessage
         <strong>${inviter}</strong> t'invite à rejoindre sa table
         <strong>« ${title} »</strong>.
       </p>
-      <p style="margin:0 0 16px;line-height:1.5">
-        Installe Questbook, connecte-toi avec <strong>cette adresse</strong>,
-        puis ouvre l'onglet Tables : l'invitation t'y attend.
-      </p>
       <p style="margin:0 0 24px">
         <a href="${url}" style="display:inline-block;background:#c8912f;color:#2b2118;text-decoration:none;padding:12px 20px;border-radius:6px;font-weight:bold">
-          Voir l'invitation
+          Rejoindre la table
         </a>
       </p>
-    </div>
-  </body>
-</html>`,
-    };
-  }
-
-  return {
-    to: input.to,
-    subject: `${input.inviterName} t'invite à rejoindre « ${input.tableTitle} »`,
-    text: [
-      `${input.inviterName} t'invite à rejoindre sa table « ${input.tableTitle} » sur Questbook.`,
-      '',
-      `Pour accepter : ${input.acceptUrl}`,
-      '',
-      "Tu peux aussi ouvrir l'application, l'invitation t'y attend dans l'onglet Tables.",
-    ].join('\n'),
-    html: `<!doctype html>
-<html lang="fr">
-  <body style="margin:0;padding:24px;background:#f4ecd8;font-family:Georgia,serif;color:#2b2118">
-    <div style="max-width:520px;margin:0 auto;background:#fbf6ea;border:3px solid #6b4f2a;border-radius:10px;padding:28px">
-      <h1 style="margin:0 0 16px;font-size:20px">Une nouvelle table t'attend</h1>
-      <p style="margin:0 0 16px;line-height:1.5">
-        <strong>${inviter}</strong> t'invite à rejoindre sa table
-        <strong>« ${title} »</strong> sur Questbook.
-      </p>
-      <p style="margin:0 0 24px">
-        <a href="${url}" style="display:inline-block;background:#c8912f;color:#2b2118;text-decoration:none;padding:12px 20px;border-radius:6px;font-weight:bold">
-          Accepter l'invitation
-        </a>
+      <p style="margin:0 0 8px;font-size:13px;color:#6b5c48;line-height:1.5">
+        Ouvre ce lien depuis ton téléphone : il t'emmène dans Questbook, ou
+        vers le store pour l'installer si tu ne l'as pas encore.
       </p>
       <p style="margin:0;font-size:13px;color:#6b5c48;line-height:1.5">
-        Tu peux aussi ouvrir l'application : l'invitation t'attend dans l'onglet Tables.
+        Ce lien est personnel et ne sert qu'une fois.
       </p>
     </div>
   </body>

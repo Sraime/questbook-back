@@ -56,7 +56,7 @@ export interface AdminScenarioDetail {
 
 export interface AdminScenarioOwner {
   userId: string;
-  email: string;
+  email: string | null;
   /// Absent tant qu'un compte n'a pas choisi de pseudo : c'est le courriel qui
   /// identifie, le pseudo qui aide a reconnaitre.
   displayName: string | null;

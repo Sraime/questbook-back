@@ -8,7 +8,7 @@ import type { ListReportsQuery, ResolveReportInput } from './admin-report.schema
 /// deja ce que le mail de signalement porte aujourd'hui.
 export interface ReportedParty {
   id: string;
-  email: string;
+  email: string | null;
   displayName: string | null;
 }
 

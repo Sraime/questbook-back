@@ -319,9 +319,10 @@ export class TableService {
 
   // --- Invitations ---
 
-  /// A registered player is notified in the app and can accept from the mailed
-  /// link. An unknown mailbox still gets the invitation: they install Questbook,
-  /// sign in with that address, and find it waiting in the Tables tab.
+  /// The mailed link carries a single-use code that any signed-in account can
+  /// redeem, whatever its own address. When the address already has an
+  /// account, that account is also notified and finds the invitation in the
+  /// app.
   async invite(
     userId: string,
     tableId: string,
@@ -434,7 +435,6 @@ export class TableService {
           tableTitle: table.title,
           inviterName,
           acceptUrl,
-          needsAccount: !invited,
         }),
       );
     } catch (error) {
@@ -489,57 +489,88 @@ export class TableService {
     return this.settle(invitation.id, userId, accept);
   }
 
-  /// Read-only counterpart of [acceptByToken], for the page the emailed link
-  /// opens. It validates the invitation before showing a button that would
-  /// only fail.
+  /// What the page behind the emailed link shows. It only reads: a mail client
+  /// prefetching links must not be able to spend the code.
   async previewByToken(
     token: string,
-  ): Promise<{ tableTitle: string; inviterName: string; needsAccount: boolean }> {
+  ): Promise<{ tableTitle: string; inviterName: string }> {
     const invitation = await this.prisma.tableInvitation.findUnique({
       where: { tokenHash: hashToken(token) },
       include: { table: { select: { title: true } }, invitedBy: true },
     });
 
     if (!invitation) {
-      throw notFound('Cette invitation n’existe pas ou a déjà été utilisée.');
+      throw notFound('Cette invitation n’existe pas.');
     }
 
-    if (invitation.status !== 'pending') {
-      throw conflict('Cette invitation a déjà reçu une réponse.');
-    }
-
-    if (invitation.expiresAt.getTime() < Date.now()) {
-      throw conflict('Cette invitation a expiré.');
-    }
+    assertRedeemable(invitation);
 
     return {
       tableTitle: invitation.table.title,
       inviterName: displayNameOf(toTableUserDto(invitation.invitedBy)),
-      needsAccount: invitation.invitedUserId === null,
     };
   }
 
-  /// Reached from the emailed link, where possession of the token is the only
-  /// credential. The invitation must already name an account: an unknown
-  /// mailbox has to sign in first, otherwise there is nobody to enrol.
-  async acceptByToken(token: string): Promise<{ tableTitle: string }> {
+  /// Le code du lien envoye par e-mail, echange par le compte connecte.
+  ///
+  /// L'adresse de l'invitation ne compte plus : un compte Apple n'a souvent
+  /// qu'une adresse de relais, que le MJ ne connait pas. C'est la possession du
+  /// code qui fait foi, d'ou l'usage unique — une fois echange, il n'ouvre
+  /// plus la table a personne d'autre.
+  async redeem(userId: string, code: string): Promise<GameTableDto> {
     const invitation = await this.prisma.tableInvitation.findUnique({
-      where: { tokenHash: hashToken(token) },
-      include: { table: { select: { title: true } } },
+      where: { tokenHash: hashToken(code) },
+      select: {
+        id: true,
+        tableId: true,
+        status: true,
+        expiresAt: true,
+        invitedUserId: true,
+      },
     });
 
     if (!invitation) {
-      throw notFound('Invitation not found');
+      throw notFound('Cette invitation n’existe pas.');
     }
 
-    if (!invitation.invitedUserId) {
-      throw conflict(
-        'Crée un compte Questbook avec cette adresse, puis ouvre l’application.',
-      );
+    // Le meme compte qui rouvre son lien, ou une requete rejouee apres une
+    // coupure reseau : il est deja a la table, c'est un succes.
+    if (invitation.status === 'accepted' && invitation.invitedUserId === userId) {
+      return this.get(userId, invitation.tableId);
     }
 
-    await this.settle(invitation.id, invitation.invitedUserId, true);
-    return { tableTitle: invitation.table.title };
+    assertRedeemable(invitation);
+
+    const member = await this.prisma.tableMember.findUnique({
+      where: { tableId_userId: { tableId: invitation.tableId, userId } },
+      select: { id: true },
+    });
+
+    // Le code n'est pas consomme : il reste a qui il etait destine.
+    if (member) {
+      throw conflict('Tu fais déjà partie de cette table.');
+    }
+
+    // Un blocage, dans un sens ou dans l'autre, avec quiconque est assis a
+    // la table. Bloquer en fait sortir les deux comptes ; un code ne doit pas
+    // les y rasseoir. Le message ne dit pas pourquoi, pour la meme raison
+    // qu'a l'invitation.
+    const blocked = await this.prisma.userBlock.findFirst({
+      where: {
+        OR: [
+          { blockerId: userId, blocked: { memberships: { some: { tableId: invitation.tableId } } } },
+          { blockedId: userId, blocker: { memberships: { some: { tableId: invitation.tableId } } } },
+        ],
+      },
+      select: { id: true },
+    });
+
+    if (blocked) {
+      throw forbidden('Tu ne peux pas rejoindre cette table.');
+    }
+
+    const table = await this.settle(invitation.id, userId, true);
+    return table!;
   }
 
   private async settle(
@@ -549,23 +580,13 @@ export class TableService {
   ): Promise<GameTableDto | null> {
     const invitation = await this.prisma.tableInvitation.findUniqueOrThrow({
       where: { id: invitationId },
-      include: {
-        table: { select: { title: true, id: true } },
-        invitedUser: true,
-      },
+      include: { table: { select: { title: true, id: true } } },
     });
 
-    if (invitation.status !== 'pending') {
-      throw conflict(`This invitation was already ${invitation.status}`);
-    }
+    assertRedeemable(invitation);
 
-    if (invitation.expiresAt.getTime() < Date.now()) {
-      throw conflict('This invitation has expired');
-    }
-
-    const playerName = invitation.invitedUser
-      ? publicLabel(invitation.invitedUser)
-      : 'Joueur';
+    const player = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    const playerName = publicLabel(player);
     const draft: NotificationDraft = {
       userId: invitation.invitedById,
       type: 'invitation_accepted',
@@ -577,10 +598,21 @@ export class TableService {
     };
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.tableInvitation.update({
-        where: { id: invitationId },
-        data: { status: accept ? 'accepted' : 'declined', respondedAt: new Date() },
+      // Conditionnel, et non une simple mise a jour : deux comptes qui
+      // echangent le meme code au meme instant passent tous deux les
+      // controles ci-dessus, et seul le premier doit entrer.
+      const spent = await tx.tableInvitation.updateMany({
+        where: { id: invitationId, status: 'pending' },
+        data: {
+          status: accept ? 'accepted' : 'declined',
+          respondedAt: new Date(),
+          invitedUserId: userId,
+        },
       });
+
+      if (spent.count === 0) {
+        throw conflict('Cette invitation a déjà été utilisée.');
+      }
 
       if (accept) {
         // Idempotent: accepting twice in quick succession, e.g. by double
@@ -660,6 +692,22 @@ export class TableService {
           : [],
       nextSessionAt: row.sessions[0]?.startsAt.toISOString() ?? null,
     };
+  }
+}
+
+/// Les messages remontent tels quels jusqu'a l'ecran du joueur, d'ou le
+/// francais.
+function assertRedeemable(invitation: { status: string; expiresAt: Date }): void {
+  if (invitation.status === 'accepted') {
+    throw conflict('Cette invitation a déjà été utilisée.');
+  }
+
+  if (invitation.status !== 'pending') {
+    throw conflict('Cette invitation n’est plus valable.');
+  }
+
+  if (invitation.expiresAt.getTime() < Date.now()) {
+    throw conflict('Cette invitation a expiré.');
   }
 }
 

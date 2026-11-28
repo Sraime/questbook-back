@@ -25,7 +25,10 @@ model User {
   googleSub String? @unique @map("google_sub")
   appleSub  String? @unique @map("apple_sub")
 
-  email       String   @unique
+  /// Nulle pour un compte Apple qui n'a pas partage son adresse. Rien n'en
+  /// depend plus : une table se rejoint par le code du lien, pas par
+  /// l'adresse a laquelle il a ete envoye.
+  email       String?  @unique
   displayName String?  @map("display_name")
   pictureUrl  String?  @map("picture_url")
   locale      String?
@@ -200,16 +203,17 @@ model TableMember {
   @@map("table_members")
 }
 
-/// Invitations are only ever created for an email that already has an account,
-/// so `invitedUserId` is always known and the acceptance link needs no login.
-/// The token is stored hashed for the same reason as refresh tokens: whoever
-/// holds it can join the table.
+/// The emailed link carries a single-use code that any signed-in account may
+/// redeem: an Apple account rarely has the address the game master knows. The
+/// token is stored hashed for the same reason as refresh tokens: whoever holds
+/// it can join the table.
 model TableInvitation {
   id            String    @id @default(uuid())
   tableId       String    @map("table_id")
   email         String
-  /// Null until the address belongs to a Questbook account. The emailed link
-  /// then waits for them to sign in rather than granting membership blindly.
+  /// The account the address belongs to while the invitation waits, so it
+  /// shows up in that account's app. Once redeemed, the account that spent
+  /// the code, which may be another one.
   invitedUserId String?   @map("invited_user_id")
   invitedById   String    @map("invited_by_id")
   tokenHash     String    @unique @map("token_hash")

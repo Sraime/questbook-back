@@ -28,7 +28,7 @@ export function toTableUserDto(user: User, viewerId?: string): TableUserDto {
     displayName: publicLabel(user),
     pictureUrl: user.pictureUrl,
   };
-  if (viewerId === user.id) {
+  if (viewerId === user.id && user.email !== null) {
     dto.email = user.email;
   }
   return dto;

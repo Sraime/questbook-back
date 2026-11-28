@@ -212,8 +212,10 @@ Trois différences avec Google, toutes dictées par le jeton :
   `displayName`, et on ne lui fait pas plus confiance qu'au renommage : le
   joueur peut le changer ensuite, c'est tout ce que ce champ vaut.
 - **L'adresse peut manquer**, si le compte a été autorisé sans la partager.
-  Une table s'invite par adresse : la connexion répond alors `400` en le
-  disant, plutôt que de fabriquer une adresse interne.
+  Le compte se crée alors sans adresse (`users.email` est nullable) : une
+  table se rejoint par le code du lien d'invitation, pas par l'adresse à
+  laquelle il a été envoyé. Dans le backoffice, la fermeture d'un tel compte
+  se confirme en recopiant son identifiant.
 - **Rien ne se rafraîchit ensuite.** Les connexions suivantes ne portent que le
   `sub`, et c'est par lui que le compte se retrouve — jamais par l'email.
 
@@ -869,8 +871,9 @@ facteur, et `DATABASE_URL` peut pointer ailleurs qu'on ne le croit.
 ## Endpoints
 
 Préfixe : `/api/v1`. Toutes les routes exigent l'en-tête
-`Authorization: Bearer <accessToken>`, à la seule exception de la page web
-d'acceptation d'invitation, servie hors préfixe (voir plus bas).
+`Authorization: Bearer <accessToken>`, à l'exception de la page web du lien
+d'invitation et des deux fichiers `/.well-known/`, servis hors préfixe (voir
+plus bas).
 
 ### Authentification
 
@@ -939,6 +942,7 @@ Les stats et ressources sont adressées par leur **clé métier** (`bibliotheque
 | `POST`   | `/tables/:id/invitations`                | Inviter par e-mail (MJ, 201)                 |
 | `DELETE` | `/tables/:id/invitations/:invitationId`  | Révoquer une invitation (MJ, 204)            |
 | `GET`    | `/invitations`                           | Invitations reçues, en attente               |
+| `POST`   | `/invitations/redeem`                    | Échanger le code du lien `{code}` contre une place |
 | `POST`   | `/invitations/:id/accept`                | Accepter depuis l'app                        |
 | `POST`   | `/invitations/:id/decline`               | Décliner (204)                               |
 
@@ -1449,30 +1453,63 @@ modifient en même temps.
 
 ```
 MJ ──POST /tables/:id/invitations {email}──▶ API
-                                             │  compte existant ?
-                                             │  oui → invitation + notification
-                                             │  non → invitation, pas de notif in-app
-                                             ├──▶ Resend : lien /invitations/:token
-Joueur inscrit ──GET/POST /invitations/:token─▶│  page HTML + acceptation
-Joueur inconnu ──GET /invitations/:token─────▶│  page « installe l'app »
-                                             └──▶ à la première connexion, l'invitation
-                                                 apparaît dans l'onglet Tables
+                                             │  adresse d'un compte existant ?
+                                             │  oui → invitation + notification in-app
+                                             ├──▶ Resend : https://…/invitations/:code
+Telephone avec l'app ── le lien ouvre l'app ──▶ POST /invitations/redeem {code}
+                                                 (connecte, n'importe quel compte)
+Telephone sans l'app ── GET /invitations/:code ─▶ page : store, ou « ouvrir l'app »
 ```
+
+Le lien ne lie plus l'invitation à une adresse : **c'est la possession du code
+qui fait foi**, et c'est le compte connecté dans l'app qui l'échange, quelle que
+soit son adresse. La raison est Apple : un compte Apple n'a souvent qu'une
+adresse de relais, que le MJ ne connaît pas, voire aucune.
 
 Garde-fous :
 
+- **Usage unique.** Une fois échangé, le code ne fait plus entrer personne
+  (`409`). La consommation est un `updateMany` conditionné à `pending` : deux
+  comptes qui échangent le même code au même instant, un seul entre. Le même
+  compte qui le rouvre reçoit la table (`200`), pour qu'un second clic ou une
+  requête rejouée ne soit pas une erreur.
+- **Le code n'est pas gâché** par un compte déjà à la table — typiquement le
+  MJ qui teste son propre lien : `409`, et l'invitation reste en attente.
+- **Blocages.** Un blocage, dans un sens ou dans l'autre, avec quiconque est
+  assis à la table refuse l'échange (`403`), sans dire pourquoi.
 - **15 invitations par jour et par compte**, tous tables confondues, pour qu'un
   jeton volé ne spamme pas des boîtes quelconques.
 - **8 joueurs par table** (le MJ n'est pas compté), invitations en attente
   comprises : une place réservée n'est plus libre.
-- **Le lien n'accepte rien en `GET`.** Les clients mail préchargent les liens ;
-  seul le `POST` du bouton engage un joueur déjà inscrit. Un jeton envoyé à une
-  adresse sans compte n'enrolera personne tant que cette adresse n'a pas créé
-  de compte. Le jeton suit le motif des refresh tokens : 48 octets aléatoires
-  envoyés, hachage SHA-256 stocké, et ajouté à la liste `redact` du logger.
+- **La page web n'accepte rien.** Les clients mail préchargent les liens, et
+  seule l'app a un compte connecté. Elle propose le store selon le téléphone :
+  sur Android, une URL `intent://` ouvre l'app ou, à défaut, le Play Store ;
+  sur iPhone, l'App Store puis `questbook://`. Un lien `https` tapé depuis une
+  page du même domaine n'ouvre jamais l'app, d'où le schéma.
+- **Le code reste un secret.** 48 octets aléatoires, hachage SHA-256 stocké,
+  masqué dans les logs de l'API (`req.params.token`, `req.body.code`) et de
+  Caddy.
 
 L'invitation reste par ailleurs visible et acceptable directement dans l'app
-dès que le destinataire a un compte.
+pour le compte qui porte l'adresse invitée, tant que le code n'a pas servi.
+
+#### Ouvrir l'app depuis le lien
+
+`/.well-known/assetlinks.json` (Android) et
+`/.well-known/apple-app-site-association` (iOS) disent aux téléphones que l'app
+`com.questbook.questbook` peut ouvrir les liens `/invitations/*` de ce domaine.
+L'API les sert elle-même : tout ce qui n'est pas une page légale part déjà vers
+elle, et le `Caddyfile` n'a pas à changer.
+
+Les empreintes SHA-256 d'`assetlinks.json` sont celles des **deux** certificats
+qui signent l'app : la clé d'upload (builds Firebase) et la clé de Google Play
+(ce que le store livre). Elles se lisent dans la Play Console, **Test et
+publication > Intégrité de l'application**. Sans la seconde, l'app du Play
+Store ne serait pas vérifiée et le lien ouvrirait le navigateur.
+
+Côté Apple, le fichier ne suffit pas : l'App ID doit porter la capacité
+**Associated Domains**, et les profils de provisionnement doivent être
+régénérés après l'avoir cochée (voir le README de l'app).
 
 ### Transmission du rôle de MJ
 
@@ -1783,9 +1820,9 @@ pour ne pas divulguer l'existence d'un identifiant), **minimisation des emails**
 (un membre ne voit jamais la boîte d'un autre, le JWT ne porte que `sub`), CRUD inventaire, bornage
 des ressources, les quatre scénarios de synchronisation (création, remplacement
 d'agrégat, conflit périmé, propagation des tombstones), et tout le périmètre
-des tables : invitation d'une adresse inconnue (e-mail d'installation, rattachement
-à la première connexion), plafond de 8 joueurs et de 15 invitations par jour,
-acceptation par le lien
+des tables : invitation d'une adresse inconnue (rattachement à la première
+connexion), code du lien à usage unique échangé par n'importe quel compte,
+plafond de 8 joueurs et de 15 invitations par jour, acceptation par le lien
 web et depuis l'app, rejeu impossible, révocation, autorisations MJ/joueur,
 création et modification de sessions, changements de participation, et
 vérification que chaque événement produit bien la notification et l'e-mail

@@ -6,7 +6,7 @@ export interface Admin {
 
 export interface Party {
   id: string;
-  email: string;
+  email: string | null;
   displayName: string | null;
 }
 
@@ -41,7 +41,7 @@ export interface ReportPage {
 /// suspension datee s'eteint d'elle-meme et le compte est deja revenu.
 export interface SuspendedUser {
   id: string;
-  email: string;
+  email: string | null;
   displayName: string | null;
   suspendedAt: string;
   suspendedUntil: string | null;
@@ -98,7 +98,7 @@ export interface ScenarioDetail {
 
 export interface ScenarioOwner {
   userId: string;
-  email: string;
+  email: string | null;
   displayName: string | null;
   /// `grant` pour un don ou le cadeau de bienvenue, `purchase` pour un achat.
   source: string;
@@ -155,7 +155,7 @@ export interface AdminBundle {
 
 export interface UserDetail {
   id: string;
-  email: string;
+  email: string | null;
   displayName: string | null;
   createdAt: string;
   suspended: boolean;
