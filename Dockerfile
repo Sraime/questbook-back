@@ -22,6 +22,9 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY prisma ./prisma
 RUN npx prisma generate
 COPY --from=build /app/dist ./dist
+# The projection page's script and the pictures the app embeds: the API serves
+# them itself, so the page works without Caddy in front.
+COPY web/projection ./web/projection
 COPY docker-entrypoint.sh ./
 RUN chmod +x docker-entrypoint.sh && chown -R node:node /app
 USER node

@@ -17,6 +17,7 @@ import notificationRoutes from './modules/notifications/notification.routes.js';
 import invitationRoutes from './modules/tables/invitation.routes.js';
 import invitationWebRoutes from './modules/tables/invitation-web.routes.js';
 import appLinksRoutes from './modules/app-links/app-links.routes.js';
+import projectionRoutes from './modules/projection/projection.routes.js';
 import sessionRoutes from './modules/tables/session.routes.js';
 import tableRoutes from './modules/tables/table.routes.js';
 import scenarioRoutes from './modules/scenarios/scenario.routes.js';
@@ -166,7 +167,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(authRoutes, { prefix: '/api/v1/auth' });
   await app.register(characterRoutes, { prefix: '/api/v1/characters' });
   await app.register(tableRoutes, { ...tableOptions, prefix: '/api/v1/tables' });
-  await app.register(sessionRoutes, { prefix: '/api/v1/sessions' });
+  await app.register(sessionRoutes, {
+    publicBaseUrl: env.PUBLIC_BASE_URL,
+    prefix: '/api/v1/sessions',
+  });
   await app.register(invitationRoutes, {
     ...tableOptions,
     prefix: '/api/v1/invitations',
@@ -186,6 +190,12 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   // their mail client, and it renders HTML rather than JSON.
   await app.register(invitationWebRoutes, { ...tableOptions, prefix: '/invitations' });
   await app.register(appLinksRoutes);
+  // Public aussi, et pour la meme raison : c'est l'ecran de la salle qui
+  // l'ouvre, sans compte.
+  await app.register(projectionRoutes, {
+    publicBaseUrl: env.PUBLIC_BASE_URL,
+    prefix: '/projection',
+  });
 
   return app;
 }
@@ -193,5 +203,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 /// Invitation accept links are unguessable tokens in the path. Echoing the
 /// raw URL into logs or 404 bodies would print a credential.
 function redactLoggedUrl(url: string): string {
-  return url.replace(/(\/invitations\/)[^/?#]+/gi, '$1[redacted]');
+  return url
+    .replace(/(\/invitations\/)[^/?#]+/gi, '$1[redacted]')
+    .replace(/(\/projection\/)(?!static\/)[^/?#]+/gi, '$1[redacted]');
 }

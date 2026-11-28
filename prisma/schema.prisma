@@ -242,6 +242,10 @@ model GameSession {
   /// Optional catalogue scenario the evening is based on. Dropping the
   /// catalogue row must not erase the session, hence SetNull.
   scenarioId  String?  @map("scenario_id")
+  /// Le lien public qui projette le plateau, hache comme tout jeton : qui le
+  /// tient voit la partie. Un seul a la fois, en generer un autre revoque
+  /// celui-ci. Il ne vaut que pendant la seance, d'ou aucune date a lui.
+  projectionTokenHash String?  @unique @map("projection_token_hash")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
