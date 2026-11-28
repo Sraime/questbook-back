@@ -174,6 +174,11 @@ export const invitationTokenParamsSchema = z.object({
   token: z.string().min(1).max(200),
 });
 
+/// The same token, carried by the app once the link has opened it.
+export const redeemInvitationSchema = z.object({
+  code: z.string().trim().min(1).max(200),
+});
+
 export type CreateTableInput = z.infer<typeof createTableSchema>;
 export type PatchTableInput = z.infer<typeof patchTableSchema>;
 export type InviteInput = z.infer<typeof inviteSchema>;

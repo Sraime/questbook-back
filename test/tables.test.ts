@@ -6,7 +6,7 @@ import {
   signIn,
   type TestContext,
 } from './helpers/test-app.js';
-import { createTable, invite, joinTable } from './helpers/tables.js';
+import { createTable, invite, joinTable, redeem } from './helpers/tables.js';
 
 let context: TestContext;
 
@@ -113,7 +113,7 @@ describe('Tables', () => {
 });
 
 describe('Invitations', () => {
-  it('emails an unknown address and waits for them to create an account', async () => {
+  it('emails an unknown address a link that says it only works once', async () => {
     const gm = await signIn(context, 'gm');
     const table = await createTable(context, gm);
 
@@ -125,19 +125,10 @@ describe('Invitations', () => {
     });
 
     expect(response.statusCode).toBe(201);
-    expect(context.email.lastTo('inconnu@example.com')?.text).toContain(
-      'installe Questbook',
-    );
-
-    const preview = await context.app.inject({
-      method: 'GET',
-      url: `/invitations/${/\/invitations\/([\w-]+)/.exec(
-        context.email.lastTo('inconnu@example.com')?.text ?? '',
-      )?.[1]}`,
-    });
-    expect(preview.statusCode).toBe(200);
-    expect(preview.body).toContain('connecte-toi');
-    expect(preview.body).not.toContain('Accepter l\'invitation');
+    const sent = context.email.lastTo('inconnu@example.com');
+    expect(sent?.text).toContain('/invitations/');
+    expect(sent?.text).toContain('ne sert qu’une fois');
+    expect(sent?.html).toContain('ne sert qu\'une fois');
   });
 
   it('emails a link and notifies the invited player in the app', async () => {
@@ -186,10 +177,10 @@ describe('Invitations', () => {
       expect(sent?.text).not.toMatch(/Google|Apple/);
       expect(sent?.html).not.toMatch(/Google|Apple/);
 
-      // Ce qui doit rester : c'est l'adresse qui compte, et sans elle
-      // `claimInvitations` ne rattache rien a la connexion qui suit.
-      expect(sent?.text).toContain('cette adresse');
-      expect(sent?.html).toContain('cette adresse');
+      // L'adresse ne compte plus : le message ne doit plus demander de se
+      // connecter avec elle, ce qui egarerait un compte Apple.
+      expect(sent?.text).not.toContain('cette adresse');
+      expect(sent?.html).not.toContain('cette adresse');
     });
 
     it('names no provider either when the account already exists', async () => {
@@ -208,20 +199,18 @@ describe('Invitations', () => {
       expect(context.email.lastTo(player.email)?.html).not.toMatch(/Google|Apple/);
     });
 
-    it('names no provider when the emailed link is followed without an account', async () => {
+    it('names no provider on the page the link opens', async () => {
       const gm = await signIn(context, 'gm');
       const table = await createTable(context, gm);
 
       const token = await invite(context, gm, table.id, 'inconnu@example.com');
 
-      const refused = await context.app.inject({
-        method: 'POST',
-        url: `/invitations/${token}/accept`,
-      });
+      const page = await context.app.inject({ method: 'GET', url: `/invitations/${token}` });
 
-      expect(refused.statusCode).toBe(409);
-      expect(refused.body).not.toMatch(/Google|Apple/);
-      expect(refused.body).toContain('cette adresse');
+      expect(page.statusCode).toBe(200);
+      // `Google Play` et `App Store` sont des stores, pas des fournisseurs de
+      // connexion : seul le second sens est interdit.
+      expect(page.body).not.toMatch(/compte (Google|Apple)/);
     });
   });
 
@@ -236,12 +225,14 @@ describe('Invitations', () => {
     expect(row.tokenHash).toHaveLength(64);
   });
 
-  it('adds the player to the table when the emailed link is used', async () => {
+  it('adds the player to the table when the app redeems the code', async () => {
     const gm = await signIn(context, 'gm');
     const player = await signIn(context, 'player');
     const table = await createTable(context, gm);
     const token = await invite(context, gm, table.id, player.email);
 
+    // La page s'affiche sans rien consommer : un client mail qui precharge
+    // les liens ne doit pas bruler le code.
     const preview = await context.app.inject({
       method: 'GET',
       url: `/invitations/${token}`,
@@ -251,21 +242,161 @@ describe('Invitations', () => {
     expect(preview.headers['content-type']).toContain('text/html');
     expect(preview.body).toContain('Les Inspecteurs Chavillois');
 
-    const accept = await context.app.inject({
+    const joined = await redeem(context, player, token);
+
+    expect(joined.statusCode).toBe(200);
+    expect(joined.json().id).toBe(table.id);
+    expect(joined.json().role).toBe('player');
+  });
+
+  it('lets an account whose address is not the invited one join', async () => {
+    // Le cas qui a motive le code : un compte Apple, dont l'adresse est un
+    // relais que le MJ n'a jamais vu.
+    const gm = await signIn(context, 'gm');
+    const table = await createTable(context, gm);
+    const token = await invite(context, gm, table.id, 'ami@example.com');
+
+    context.apple.register('apple-ami', { sub: '000123.ami', email: null });
+    const apple = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/apple',
+      payload: { identityToken: 'apple-ami' },
+    });
+    const friend = {
+      userId: apple.json().user.id as string,
+      email: '',
+      authHeader: { authorization: `Bearer ${apple.json().accessToken}` },
+    };
+
+    const joined = await redeem(context, friend, token);
+
+    expect(joined.statusCode).toBe(200);
+    const row = await prisma.tableInvitation.findFirstOrThrow();
+    expect(row.status).toBe('accepted');
+    expect(row.invitedUserId).toBe(friend.userId);
+  });
+
+  it('takes the invitation away from the address once someone else used the code', async () => {
+    const gm = await signIn(context, 'gm');
+    const addressee = await signIn(context, 'addressee');
+    const other = await signIn(context, 'other');
+    const table = await createTable(context, gm);
+    const token = await invite(context, gm, table.id, addressee.email);
+
+    await redeem(context, other, token);
+
+    const pending = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/invitations',
+      headers: addressee.authHeader,
+    });
+    expect(pending.json().invitations).toEqual([]);
+  });
+
+  it('refuses to redeem a code without being signed in', async () => {
+    const gm = await signIn(context, 'gm');
+    const table = await createTable(context, gm);
+    const token = await invite(context, gm, table.id, 'inconnu@example.com');
+
+    const response = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/invitations/redeem',
+      payload: { code: token },
+    });
+
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('no longer accepts anything from the web page', async () => {
+    const gm = await signIn(context, 'gm');
+    const player = await signIn(context, 'player');
+    const table = await createTable(context, gm);
+    const token = await invite(context, gm, table.id, player.email);
+
+    const response = await context.app.inject({
       method: 'POST',
       url: `/invitations/${token}/accept`,
     });
 
-    expect(accept.statusCode).toBe(200);
+    expect(response.statusCode).toBe(404);
+    expect((await prisma.tableInvitation.findFirstOrThrow()).status).toBe('pending');
+  });
 
-    const tables = await context.app.inject({
-      method: 'GET',
-      url: '/api/v1/tables',
-      headers: player.authHeader,
+  it('refuses an expired code', async () => {
+    const gm = await signIn(context, 'gm');
+    const player = await signIn(context, 'player');
+    const table = await createTable(context, gm);
+    const token = await invite(context, gm, table.id, player.email);
+    await prisma.tableInvitation.updateMany({ data: { expiresAt: new Date(Date.now() - 1000) } });
+
+    const response = await redeem(context, player, token);
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.message).toBe('Cette invitation a expiré.');
+  });
+
+  it('refuses a code the game master revoked', async () => {
+    const gm = await signIn(context, 'gm');
+    const player = await signIn(context, 'player');
+    const table = await createTable(context, gm);
+    const token = await invite(context, gm, table.id, player.email);
+    await prisma.tableInvitation.updateMany({ data: { status: 'revoked' } });
+
+    const response = await redeem(context, player, token);
+
+    expect(response.statusCode).toBe(409);
+  });
+
+  it('keeps the code for its addressee when a member opens it', async () => {
+    // Le MJ qui teste son propre lien ne doit pas le gacher.
+    const gm = await signIn(context, 'gm');
+    const player = await signIn(context, 'player');
+    const table = await createTable(context, gm);
+    const token = await invite(context, gm, table.id, player.email);
+
+    const mine = await redeem(context, gm, token);
+    expect(mine.statusCode).toBe(409);
+    expect(mine.json().error.message).toBe('Tu fais déjà partie de cette table.');
+
+    expect((await redeem(context, player, token)).statusCode).toBe(200);
+  });
+
+  describe('blocks', () => {
+    const block = (by: { authHeader: Record<string, string> }, userId: string) =>
+      context.app.inject({
+        method: 'POST',
+        url: '/api/v1/blocks',
+        headers: by.authHeader,
+        payload: { userId },
+      });
+
+    it('keeps out someone who blocked the game master', async () => {
+      const gm = await signIn(context, 'gm');
+      const player = await signIn(context, 'player');
+      const table = await createTable(context, gm);
+      const token = await invite(context, gm, table.id, 'autre@example.com');
+      await block(player, gm.userId);
+
+      const response = await redeem(context, player, token);
+
+      expect(response.statusCode).toBe(403);
+      expect((await prisma.tableInvitation.findFirstOrThrow()).status).toBe('pending');
     });
 
-    expect(tables.json().tables).toHaveLength(1);
-    expect(tables.json().tables[0].role).toBe('player');
+    it('keeps out someone a player of the table blocked', async () => {
+      const gm = await signIn(context, 'gm');
+      const seated = await signIn(context, 'seated');
+      const intruder = await signIn(context, 'intruder');
+      const table = await createTable(context, gm);
+      await joinTable(context, gm, seated, table.id);
+      const token = await invite(context, gm, table.id, 'autre@example.com');
+      await block(seated, intruder.userId);
+
+      const response = await redeem(context, intruder, token);
+
+      expect(response.statusCode).toBe(403);
+      expect(response.json().error.message).not.toMatch(/bloqu/i);
+    });
   });
 
   it('tells the game master that the invitation was accepted', async () => {
@@ -284,20 +415,55 @@ describe('Invitations', () => {
     expect(types).toContain('invitation_accepted');
   });
 
-  it('cannot be replayed once accepted', async () => {
+  it('cannot be spent by a second account once used', async () => {
+    const gm = await signIn(context, 'gm');
+    const player = await signIn(context, 'player');
+    const thief = await signIn(context, 'thief');
+    const table = await createTable(context, gm);
+    const token = await invite(context, gm, table.id, player.email);
+
+    await redeem(context, player, token);
+    const replay = await redeem(context, thief, token);
+
+    expect(replay.statusCode).toBe(409);
+    expect(replay.json().error.message).toBe('Cette invitation a déjà été utilisée.');
+
+    const tables = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/tables',
+      headers: thief.authHeader,
+    });
+    expect(tables.json().tables).toEqual([]);
+  });
+
+  it('lets only one of two simultaneous accounts in', async () => {
+    const gm = await signIn(context, 'gm');
+    const first = await signIn(context, 'first');
+    const second = await signIn(context, 'second');
+    const table = await createTable(context, gm);
+    const token = await invite(context, gm, table.id, 'autre@example.com');
+
+    const answers = await Promise.all([
+      redeem(context, first, token),
+      redeem(context, second, token),
+    ]);
+
+    expect(answers.map((answer) => answer.statusCode).sort()).toEqual([200, 409]);
+    expect(await prisma.tableMember.count({ where: { role: 'player' } })).toBe(1);
+  });
+
+  it('answers the same account opening its link again with the table', async () => {
+    // Une requete rejouee apres une coupure reseau, ou un second clic.
     const gm = await signIn(context, 'gm');
     const player = await signIn(context, 'player');
     const table = await createTable(context, gm);
     const token = await invite(context, gm, table.id, player.email);
 
-    await context.app.inject({ method: 'POST', url: `/invitations/${token}/accept` });
-    const replay = await context.app.inject({
-      method: 'POST',
-      url: `/invitations/${token}/accept`,
-    });
+    await redeem(context, player, token);
+    const again = await redeem(context, player, token);
 
-    expect(replay.statusCode).toBe(409);
-    expect(replay.headers['content-type']).toContain('text/html');
+    expect(again.statusCode).toBe(200);
+    expect(again.json().id).toBe(table.id);
   });
 
   it('renders a page rather than a JSON envelope for an unknown token', async () => {
@@ -415,10 +581,7 @@ describe('Invitations', () => {
     const token = await invite(context, gm, table.id, player.email);
     expect(await prisma.tableInvitation.count()).toBe(1);
 
-    const accept = await context.app.inject({
-      method: 'POST',
-      url: `/invitations/${token}/accept`,
-    });
+    const accept = await redeem(context, player, token);
     expect(accept.statusCode).toBe(200);
   });
 

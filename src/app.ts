@@ -16,6 +16,7 @@ import deviceRoutes from './modules/notifications/device.routes.js';
 import notificationRoutes from './modules/notifications/notification.routes.js';
 import invitationRoutes from './modules/tables/invitation.routes.js';
 import invitationWebRoutes from './modules/tables/invitation-web.routes.js';
+import appLinksRoutes from './modules/app-links/app-links.routes.js';
 import sessionRoutes from './modules/tables/session.routes.js';
 import tableRoutes from './modules/tables/table.routes.js';
 import scenarioRoutes from './modules/scenarios/scenario.routes.js';
@@ -66,6 +67,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
           'req.body.email',
           // An invitation token grants table membership to whoever holds it.
           'req.params.token',
+          'req.body.code',
         ],
         censor: '[redacted]',
       },
@@ -183,6 +185,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   // Outside /api/v1 and unauthenticated: this is the link people click in
   // their mail client, and it renders HTML rather than JSON.
   await app.register(invitationWebRoutes, { ...tableOptions, prefix: '/invitations' });
+  await app.register(appLinksRoutes);
 
   return app;
 }

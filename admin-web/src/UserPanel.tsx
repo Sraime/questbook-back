@@ -93,6 +93,9 @@ export function UserPanel({ userId, onError }: UserPanelProps) {
       window.location.reload();
     });
 
+  // Un compte Apple sans adresse se confirme par son identifiant.
+  const confirmation = user.email ?? user.id;
+
   return (
     <div className={user.suspended ? 'block sanction suspended' : 'block sanction'}>
       <h3>Le compte visé</h3>
@@ -100,7 +103,7 @@ export function UserPanel({ userId, onError }: UserPanelProps) {
       <dl className="facts">
         <div>
           <dt>Adresse</dt>
-          <dd>{user.email}</dd>
+          <dd>{user.email ?? '(compte Apple sans adresse)'}</dd>
         </div>
         <div>
           <dt>Pseudo</dt>
@@ -174,18 +177,18 @@ export function UserPanel({ userId, onError }: UserPanelProps) {
           {user.characters > 1 ? 's' : ''}, et tout ce qui en dépend.
         </p>
         <p className="muted">
-          Recopie <code>{user.email}</code> pour confirmer.
+          Recopie <code>{confirmation}</code> pour confirmer.
         </p>
         <input
           value={confirmEmail}
           onChange={(event) => setConfirmEmail(event.target.value)}
-          placeholder={user.email}
+          placeholder={confirmation}
           autoComplete="off"
         />
         <button
           className="destructive"
           onClick={close}
-          disabled={busy || confirmEmail.trim().toLowerCase() !== user.email.toLowerCase()}
+          disabled={busy || confirmEmail.trim().toLowerCase() !== confirmation.toLowerCase()}
         >
           Fermer ce compte
         </button>

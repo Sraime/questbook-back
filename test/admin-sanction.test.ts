@@ -362,6 +362,15 @@ describe('closing an account', () => {
     expect(await prisma.user.findUnique({ where: { id: user.userId } })).not.toBeNull();
   });
 
+  it('asks for the id of an account that has no address', async () => {
+    // Un compte Apple qui n'a pas partage son adresse.
+    const user = await prisma.user.create({ data: { appleSub: '000123.sans.adresse' } });
+
+    expect((await remove(user.id, '')).statusCode).toBe(400);
+    expect((await remove(user.id, user.id)).statusCode).toBe(204);
+    expect(await prisma.user.findUnique({ where: { id: user.id } })).toBeNull();
+  });
+
   it('closes the account and takes its tables with it', async () => {
     const gm = await signIn(product, 'genant');
     await createTable(product, gm, 'Une table a faire disparaitre');
