@@ -4,6 +4,7 @@ import { AppError } from '../../lib/errors.js';
 import { BoardService } from './board.service.js';
 import { ClueService } from './clue.service.js';
 import { NpcService } from './npc.service.js';
+import { ProjectionService } from '../projection/projection.service.js';
 import { SessionService } from './session.service.js';
 import {
   attendanceCharacterSchema,
@@ -22,14 +23,22 @@ import {
   setClueAccessSchema,
 } from './table.schemas.js';
 
+export interface SessionRoutesOptions {
+  publicBaseUrl: string;
+}
+
 /// Sessions are created under their table (see `table.routes.ts`) but read and
 /// updated by their own id, so a notification can link straight to one.
-const sessionRoutes: FastifyPluginAsync = async (fastify) => {
+const sessionRoutes: FastifyPluginAsync<SessionRoutesOptions> = async (
+  fastify,
+  options,
+) => {
   const app = fastify.withTypeProvider<ZodTypeProvider>();
   const service = new SessionService(app.prisma, app.notifications);
   const npcs = new NpcService(app.prisma);
   const clues = new ClueService(app.prisma);
   const boards = new BoardService(app.prisma);
+  const projections = new ProjectionService(app.prisma, options);
 
   app.addHook('preHandler', app.authenticate);
 
@@ -50,7 +59,14 @@ const sessionRoutes: FastifyPluginAsync = async (fastify) => {
   app.delete(
     '/:id',
     { schema: { params: sessionIdParamsSchema } },
-    async (request) => service.cancel(request.user.sub, request.params.id),
+    async (request) => {
+      const session = await service.cancel(request.user.sub, request.params.id);
+      app.boardLive.closeProjections(
+        request.params.id,
+        'Cette séance a été annulée.',
+      );
+      return session;
+    },
   );
 
   app.put(
@@ -249,6 +265,44 @@ const sessionRoutes: FastifyPluginAsync = async (fastify) => {
       app.boardLive.publish(request.params.id, board);
 
       return board;
+    },
+  );
+
+  // --- Le mode projection ---
+  //
+  // Le lien public d'un ecran de salle. Le MJ seul le cree, le remplace ou le
+  // coupe ; ce qu'il ouvre vit dans `projection.routes.ts`.
+
+  app.get(
+    '/:id/projection',
+    { schema: { params: sessionIdParamsSchema } },
+    async (request) => projections.status(request.user.sub, request.params.id),
+  );
+
+  app.post(
+    '/:id/projection',
+    { schema: { params: sessionIdParamsSchema } },
+    async (request, reply) => {
+      const link = await projections.create(request.user.sub, request.params.id);
+      // Le lien d'avant ne vaut plus rien : ses ecrans s'eteignent.
+      app.boardLive.closeProjections(
+        request.params.id,
+        'Le MJ a remplacé ce lien de projection.',
+      );
+      return reply.code(201).send(link);
+    },
+  );
+
+  app.delete(
+    '/:id/projection',
+    { schema: { params: sessionIdParamsSchema } },
+    async (request, reply) => {
+      await projections.revoke(request.user.sub, request.params.id);
+      app.boardLive.closeProjections(
+        request.params.id,
+        'Le MJ a arrêté la projection.',
+      );
+      return reply.code(204).send();
     },
   );
 

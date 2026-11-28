@@ -12,6 +12,8 @@
 				# Invitation tokens sit in the path; they must not land in the
 				# reverse-proxy logs the way a normal URI would.
 				request>uri regexp /invitations/[^/?]+ /invitations/[redacted]
+				# Same for projection links: whoever holds one watches the board.
+				request>uri regexp /projection/[A-Za-z0-9_-]{20,} /projection/[redacted]
 				request>headers>Authorization delete
 			}
 		}
